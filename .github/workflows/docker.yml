@@ -13,7 +13,7 @@ env:
 
 jobs:
   build-amd64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -63,7 +63,7 @@ jobs:
         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
   build-arm64:
-    runs-on: ubuntu-latest-arm64
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -113,7 +113,7 @@ jobs:
         outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
   create-manifest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
