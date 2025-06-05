@@ -1,6 +1,6 @@
 # OpenHands Runtime Go
 
-A Go implementation of the OpenHands runtime server.
+A Go implementation of the OpenHands runtime server
 
 ## Building
 
