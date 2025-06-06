@@ -69,17 +69,17 @@ type BrowserObservation struct {
 
 // ServerInfo represents server information
 type ServerInfo struct {
-	RuntimeID       string    `json:"runtime_id"`
-	StartTime       time.Time `json:"start_time"`
-	LastExecTime    time.Time `json:"last_execution_time"`
-	WorkingDir      string    `json:"working_directory"`
-	Plugins         []string  `json:"plugins"`
-	Username        string    `json:"username"`
-	UserID          int       `json:"user_id"`
-	FileViewerURL   string    `json:"file_viewer_url"`
-	VSCodeURL       string    `json:"vscode_url,omitempty"`
-	JupyterURL      string    `json:"jupyter_url,omitempty"`
-	SystemStats     SystemStats `json:"system_stats"`
+	RuntimeID     string      `json:"runtime_id"`
+	StartTime     time.Time   `json:"start_time"`
+	LastExecTime  time.Time   `json:"last_execution_time"`
+	WorkingDir    string      `json:"working_directory"`
+	Plugins       []string    `json:"plugins"`
+	Username      string      `json:"username"`
+	UserID        int         `json:"user_id"`
+	FileViewerURL string      `json:"file_viewer_url"`
+	VSCodeURL     string      `json:"vscode_url,omitempty"`
+	JupyterURL    string      `json:"jupyter_url,omitempty"`
+	SystemStats   SystemStats `json:"system_stats"`
 }
 
 // SystemStats represents system statistics
@@ -97,7 +97,6 @@ type UploadResponse struct {
 	Message string `json:"message"`
 	Path    string `json:"path"`
 }
-
 
 // VSCodeConnectionToken represents VSCode connection token
 type VSCodeConnectionToken struct {

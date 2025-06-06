@@ -22,15 +22,15 @@ import (
 
 // Executor handles action execution
 type Executor struct {
-	config      *config.Config
-	logger      *logrus.Logger
-	workingDir  string
-	username    string
-	userID      int
-	startTime   time.Time
+	config       *config.Config
+	logger       *logrus.Logger
+	workingDir   string
+	username     string
+	userID       int
+	startTime    time.Time
 	lastExecTime time.Time
-	mu          sync.RWMutex
-	tracer      trace.Tracer
+	mu           sync.RWMutex
+	tracer       trace.Tracer
 }
 
 // New creates a new executor
@@ -545,4 +545,3 @@ func getShell() (string, string) {
 	}
 	return "bash", "-c"
 }
-
