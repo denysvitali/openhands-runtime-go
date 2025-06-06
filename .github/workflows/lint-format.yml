@@ -1,0 +1,30 @@
+name: Lint and Format
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  lint-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21' # Specify your Go version
+
+    - name: Check formatting with gofmt
+      run: |
+        test -z $(gofmt -s -d . | tee /dev/stderr)
+
+    - name: Install golangci-lint
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2 # Or latest version
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+    - name: Run golangci-lint
+      run: golangci-lint run ./...
