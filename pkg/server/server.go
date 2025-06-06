@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -162,20 +163,67 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 
 // handleUploadFile handles file upload requests
 func (s *Server) handleUploadFile(c *gin.Context) {
-	// This is a placeholder implementation
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "File upload not implemented"})
+	ctx, span := s.tracer.Start(c.Request.Context(), "handle_upload_file")
+	defer span.End()
+
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path query parameter is required"})
+		return
+	}
+
+	content, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read request body: %v", err)})
+		return
+	}
+
+	if err := s.executor.UploadFile(ctx, path, content); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to upload file: %v", err)})
+		return
+	}
+
+	c.Status(http.StatusOK)
 }
 
 // handleDownloadFiles handles file download requests
 func (s *Server) handleDownloadFiles(c *gin.Context) {
-	// This is a placeholder implementation
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "File download not implemented"})
+	ctx, span := s.tracer.Start(c.Request.Context(), "handle_download_file")
+	defer span.End()
+
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path query parameter is required"})
+		return
+	}
+
+	content, err := s.executor.DownloadFile(ctx, path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to download file: %v", err)})
+		return
+	}
+
+	c.Data(http.StatusOK, "application/octet-stream", content)
 }
 
 // handleListFiles handles file listing requests
 func (s *Server) handleListFiles(c *gin.Context) {
-	// This is a placeholder implementation
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "File listing not implemented"})
+	ctx, span := s.tracer.Start(c.Request.Context(), "handle_list_files")
+	defer span.End()
+
+	var req models.ListFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	files, err := s.executor.ListFiles(ctx, req.Path, req.Recursive)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list files: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, files)
 }
 
 // handleVSCodeToken handles VSCode connection token requests
