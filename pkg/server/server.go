@@ -163,7 +163,8 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 
 // handleUploadFile handles file upload requests
 func (s *Server) handleUploadFile(c *gin.Context) {
-	ctx, span := s.tracer.Start(c.Request.Context(), "handle_upload_file")
+	tracer := otel.Tracer("openhands-runtime")
+	ctx, span := tracer.Start(c.Request.Context(), "handle_upload_file")
 	defer span.End()
 
 	path := c.Query("path")
@@ -188,7 +189,8 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 
 // handleDownloadFiles handles file download requests
 func (s *Server) handleDownloadFiles(c *gin.Context) {
-	ctx, span := s.tracer.Start(c.Request.Context(), "handle_download_file")
+	tracer := otel.Tracer("openhands-runtime")
+	ctx, span := tracer.Start(c.Request.Context(), "handle_download_file")
 	defer span.End()
 
 	path := c.Query("path")
@@ -208,7 +210,8 @@ func (s *Server) handleDownloadFiles(c *gin.Context) {
 
 // handleListFiles handles file listing requests
 func (s *Server) handleListFiles(c *gin.Context) {
-	ctx, span := s.tracer.Start(c.Request.Context(), "handle_list_files")
+	tracer := otel.Tracer("openhands-runtime")
+	ctx, span := tracer.Start(c.Request.Context(), "handle_list_files")
 	defer span.End()
 
 	var req models.ListFilesRequest

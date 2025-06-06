@@ -39,8 +39,8 @@ func init() {
 	rootCmd.PersistentFlags().Bool("log-json", false, "Output logs in JSON format")
 
 	// Bind flags to viper
-	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
-	viper.BindPFlag("log.json", rootCmd.PersistentFlags().Lookup("log-json"))
+	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
+	_ = viper.BindPFlag("log.json", rootCmd.PersistentFlags().Lookup("log-json"))
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o openhands-runtime
 FROM alpine:latest
 
 # Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates bash wget python3 go golangci-lint
 
 # Create a non-root user
 RUN addgroup -g 1001 -S appgroup && \

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/pkg/config"
@@ -65,7 +66,7 @@ func Initialize(cfg config.TelemetryConfig) (func(), error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := tp.Shutdown(ctx); err != nil {
-			// Log error but don't fail
+			log.Printf("Error shutting down tracer provider: %v", err)
 		}
 	}, nil
 }
