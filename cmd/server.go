@@ -13,6 +13,7 @@ import (
 	"github.com/denysvitali/openhands-runtime-go/pkg/telemetry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"strings"
 )
 
 // serverCmd represents the server command
@@ -25,6 +26,13 @@ and provides observations back to the OpenHands backend.`,
 }
 
 func init() {
+	vip := viper.New()
+	vip.AutomaticEnv()
+	// Replace . with _ in env var names (e.g., server.port becomes SERVER_PORT)
+	vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	// Use this viper instance for all subsequent viper calls in this package
+	// by replacing the global viper instance.
+	viper.SetViper(vip)
 	rootCmd.AddCommand(serverCmd)
 
 	// Server-specific flags
