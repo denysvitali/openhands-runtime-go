@@ -77,10 +77,10 @@ func setDefaults() {
 	viper.SetDefault("log.json", false)
 
 	// Environment variable mappings
-	viper.BindEnv("server.session_api_key", "SESSION_API_KEY")
-	viper.BindEnv("server.max_memory_gb", "RUNTIME_MAX_MEMORY_GB")
-	viper.BindEnv("server.no_change_timeout_seconds", "NO_CHANGE_TIMEOUT_SECONDS")
-	viper.BindEnv("telemetry.endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
+	_ = viper.BindEnv("server.session_api_key", "SESSION_API_KEY")
+	_ = viper.BindEnv("server.max_memory_gb", "RUNTIME_MAX_MEMORY_GB")
+	_ = viper.BindEnv("server.no_change_timeout_seconds", "NO_CHANGE_TIMEOUT_SECONDS")
+	_ = viper.BindEnv("telemetry.endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
 }
 
 func postProcess(cfg *Config) error {

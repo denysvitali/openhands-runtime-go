@@ -26,13 +26,12 @@ and provides observations back to the OpenHands backend.`,
 }
 
 func init() {
-	vip := viper.New()
-	vip.AutomaticEnv()
+	viper.AutomaticEnv()
 	// Replace . with _ in env var names (e.g., server.port becomes SERVER_PORT)
-	vip.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	// Use this viper instance for all subsequent viper calls in this package
 	// by replacing the global viper instance.
-	viper.SetViper(vip)
+	// viper.SetViper(vip) // This was causing issues
 	rootCmd.AddCommand(serverCmd)
 
 	// Server-specific flags
@@ -47,15 +46,15 @@ func init() {
 	serverCmd.Flags().String("otel-endpoint", "", "OpenTelemetry endpoint (if empty, uses auto-export)")
 
 	// Bind flags to viper
-	viper.BindPFlag("server.port", serverCmd.Flags().Lookup("port"))
-	viper.BindPFlag("server.working_dir", serverCmd.Flags().Lookup("working-dir"))
-	viper.BindPFlag("server.plugins", serverCmd.Flags().Lookup("plugins"))
-	viper.BindPFlag("server.username", serverCmd.Flags().Lookup("username"))
-	viper.BindPFlag("server.user_id", serverCmd.Flags().Lookup("user-id"))
-	viper.BindPFlag("server.browsergym_eval_env", serverCmd.Flags().Lookup("browsergym-eval-env"))
-	viper.BindPFlag("server.session_api_key", serverCmd.Flags().Lookup("session-api-key"))
-	viper.BindPFlag("telemetry.enabled", serverCmd.Flags().Lookup("enable-telemetry"))
-	viper.BindPFlag("telemetry.endpoint", serverCmd.Flags().Lookup("otel-endpoint"))
+	_ = viper.BindPFlag("server.port", serverCmd.Flags().Lookup("port"))
+	_ = viper.BindPFlag("server.working_dir", serverCmd.Flags().Lookup("working-dir"))
+	_ = viper.BindPFlag("server.plugins", serverCmd.Flags().Lookup("plugins"))
+	_ = viper.BindPFlag("server.username", serverCmd.Flags().Lookup("username"))
+	_ = viper.BindPFlag("server.user_id", serverCmd.Flags().Lookup("user-id"))
+	_ = viper.BindPFlag("server.browsergym_eval_env", serverCmd.Flags().Lookup("browsergym-eval-env"))
+	_ = viper.BindPFlag("server.session_api_key", serverCmd.Flags().Lookup("session-api-key"))
+	_ = viper.BindPFlag("telemetry.enabled", serverCmd.Flags().Lookup("enable-telemetry"))
+	_ = viper.BindPFlag("telemetry.endpoint", serverCmd.Flags().Lookup("otel-endpoint"))
 }
 
 func runServer(cmd *cobra.Command, args []string) error {

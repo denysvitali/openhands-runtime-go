@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -169,7 +168,7 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 
 // executeFileRead reads a file
 func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "file_read")
+	_, span := e.tracer.Start(ctx, "file_read")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("path", action.Path))
@@ -215,7 +214,7 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 
 // executeFileWrite writes to a file
 func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWriteAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "file_write")
+	_, span := e.tracer.Start(ctx, "file_write")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("path", action.Path))
@@ -325,7 +324,7 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 
 // executeIPython executes IPython code (placeholder implementation)
 func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunCellAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "ipython_run")
+	_, span := e.tracer.Start(ctx, "ipython_run")
 	defer span.End()
 
 	// This is a placeholder - in a real implementation you'd integrate with Jupyter
@@ -339,7 +338,7 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 
 // executeBrowseURL navigates to a URL (placeholder implementation)
 func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURLAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "browse_url")
+	_, span := e.tracer.Start(ctx, "browse_url")
 	defer span.End()
 
 	// This is a placeholder - in a real implementation you'd integrate with a browser
@@ -353,7 +352,7 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 
 // executeBrowseInteractive performs browser interaction (placeholder implementation)
 func (e *Executor) executeBrowseInteractive(ctx context.Context, action models.BrowseInteractiveAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "browse_interactive")
+	_, span := e.tracer.Start(ctx, "browse_interactive")
 	defer span.End()
 
 	// This is a placeholder - in a real implementation you'd integrate with a browser
@@ -444,7 +443,7 @@ func (e *Executor) toRelativePath(path string) string {
 
 // ListFiles lists files in a directory
 func (e *Executor) ListFiles(ctx context.Context, path string, recursive bool) ([]models.FileInfo, error) {
-	ctx, span := e.tracer.Start(ctx, "list_files")
+	_, span := e.tracer.Start(ctx, "list_files")
 	defer span.End()
 
 	span.SetAttributes(
@@ -497,7 +496,7 @@ func (e *Executor) ListFiles(ctx context.Context, path string, recursive bool) (
 
 // UploadFile handles file uploads
 func (e *Executor) UploadFile(ctx context.Context, path string, content []byte) error {
-	ctx, span := e.tracer.Start(ctx, "upload_file")
+	_, span := e.tracer.Start(ctx, "upload_file")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("path", path))
@@ -521,7 +520,7 @@ func (e *Executor) UploadFile(ctx context.Context, path string, content []byte) 
 
 // DownloadFile handles file downloads
 func (e *Executor) DownloadFile(ctx context.Context, path string) ([]byte, error) {
-	ctx, span := e.tracer.Start(ctx, "download_file")
+	_, span := e.tracer.Start(ctx, "download_file")
 	defer span.End()
 
 	span.SetAttributes(attribute.String("path", path))
@@ -539,9 +538,9 @@ func (e *Executor) DownloadFile(ctx context.Context, path string) ([]byte, error
 }
 
 // getShell returns the appropriate shell for the current OS
-func getShell() (string, string) {
-	if runtime.GOOS == "windows" {
-		return "cmd", "/c"
-	}
-	return "bash", "-c"
-}
+//func getShell() (string, string) {
+//	if runtime.GOOS == "windows" {
+//		return "cmd", "/c"
+//	}
+//	return "bash", "-c"
+//}
