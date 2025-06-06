@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -430,3 +431,118 @@ func (e *Executor) initUser() error {
 	e.logger.Infof("Running as user: %s (UID: %s)", currentUser.Username, currentUser.Uid)
 	return nil
 }
+
+// toRelativePath converts an absolute path to a path relative to the working directory
+func (e *Executor) toRelativePath(path string) string {
+	relPath, err := filepath.Rel(e.workingDir, path)
+	if err != nil {
+		// If there's an error (e.g., different volumes on Windows), return the original path
+		return path
+	}
+	return relPath
+}
+
+// ListFiles lists files in a directory
+func (e *Executor) ListFiles(ctx context.Context, path string, recursive bool) ([]models.FileInfo, error) {
+	ctx, span := e.tracer.Start(ctx, "list_files")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("path", path),
+		attribute.Bool("recursive", recursive),
+	)
+
+	resolvedPath := e.resolvePath(path)
+	var files []models.FileInfo
+
+	if recursive {
+		err := filepath.Walk(resolvedPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			files = append(files, models.FileInfo{
+				Path:  e.toRelativePath(path),
+				IsDir: info.IsDir(),
+				Size:  info.Size(),
+			})
+			return nil
+		})
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+	} else {
+		dirEntries, err := os.ReadDir(resolvedPath)
+		if err != nil {
+			span.RecordError(err)
+			return nil, err
+		}
+
+		for _, entry := range dirEntries {
+			info, err := entry.Info()
+			if err != nil {
+				span.RecordError(err)
+				return nil, err
+			}
+			files = append(files, models.FileInfo{
+				Path:  e.toRelativePath(filepath.Join(resolvedPath, entry.Name())),
+				IsDir: entry.IsDir(),
+				Size:  info.Size(),
+			})
+		}
+	}
+
+	return files, nil
+}
+
+// UploadFile handles file uploads
+func (e *Executor) UploadFile(ctx context.Context, path string, content []byte) error {
+	ctx, span := e.tracer.Start(ctx, "upload_file")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("path", path))
+
+	resolvedPath := e.resolvePath(path)
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0755); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	// Write file
+	if err := os.WriteFile(resolvedPath, content, 0644); err != nil {
+		span.RecordError(err)
+		return err
+	}
+
+	return nil
+}
+
+// DownloadFile handles file downloads
+func (e *Executor) DownloadFile(ctx context.Context, path string) ([]byte, error) {
+	ctx, span := e.tracer.Start(ctx, "download_file")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("path", path))
+
+	resolvedPath := e.resolvePath(path)
+
+	// Read file
+	content, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	return content, nil
+}
+
+// getShell returns the appropriate shell for the current OS
+func getShell() (string, string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", "/c"
+	}
+	return "bash", "-c"
+}
+
