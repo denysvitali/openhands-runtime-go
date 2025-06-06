@@ -98,10 +98,6 @@ type UploadResponse struct {
 	Path    string `json:"path"`
 }
 
-// ListFilesRequest represents a file listing request
-type ListFilesRequest struct {
-	Path string `json:"path,omitempty"`
-}
 
 // VSCodeConnectionToken represents VSCode connection token
 type VSCodeConnectionToken struct {
