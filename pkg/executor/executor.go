@@ -329,7 +329,7 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 
 	// This is a placeholder - in a real implementation you'd integrate with Jupyter
 	return models.IPythonRunCellObservation{
-		Observation: "ipython",
+		Observation: "run_ipython",
 		Content:     "IPython execution not implemented in Go runtime",
 		Code:        action.Code,
 		Timestamp:   time.Now(),
