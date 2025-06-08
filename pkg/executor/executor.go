@@ -327,13 +327,18 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 	_, span := e.tracer.Start(ctx, "ipython_run")
 	defer span.End()
 
+	e.logger.Infof("Executing IPython with code: %s", action.Args.Code)
+
 	// This is a placeholder - in a real implementation you'd integrate with Jupyter
-	return models.IPythonRunCellObservation{
+	observation := models.IPythonRunCellObservation{
 		Observation: "run_ipython",
 		Content:     "IPython execution not implemented in Go runtime",
 		Code:        action.Args.Code,
 		Timestamp:   time.Now(),
-	}, nil
+	}
+
+	e.logger.Infof("Created IPython observation: %+v", observation)
+	return observation, nil
 }
 
 // executeBrowseURL navigates to a URL (placeholder implementation)

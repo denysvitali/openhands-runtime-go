@@ -58,7 +58,7 @@ type IPythonRunCellAction struct {
 	Action string `json:"action"`
 	Args   struct {
 		Code string `json:"code"`
-	}
+	} `json:"args"`
 }
 
 // BrowseURLAction represents a browser URL navigation action
