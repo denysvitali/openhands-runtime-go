@@ -10,6 +10,7 @@ import (
 	"github.com/denysvitali/openhands-runtime-go/internal/models"
 	"github.com/denysvitali/openhands-runtime-go/pkg/config"
 	"github.com/denysvitali/openhands-runtime-go/pkg/executor"
+	"github.com/denysvitali/openhands-runtime-go/pkg/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -145,17 +146,34 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 		span.SetAttributes(attribute.String("action.type", actionType))
 	}
 
+	// Report action request JSON in traces and logs
+	if s.config.Telemetry.Enabled {
+		telemetry.ReportJSON(ctx, s.logger, "action_request", req.Action)
+	}
+
 	// Execute action
 	observation, err := s.executor.ExecuteAction(ctx, req.Action)
 	if err != nil {
 		span.RecordError(err)
 		s.logger.Errorf("Failed to execute action: %v", err)
-		c.JSON(http.StatusInternalServerError, models.ErrorObservation{
+		errorObs := models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to execute action: %v", err),
 			Timestamp:   time.Now(),
-		})
+		}
+		
+		// Report error observation JSON in traces and logs
+		if s.config.Telemetry.Enabled {
+			telemetry.ReportJSON(ctx, s.logger, "action_error", errorObs)
+		}
+		
+		c.JSON(http.StatusInternalServerError, errorObs)
 		return
+	}
+
+	// Report successful observation JSON in traces and logs
+	if s.config.Telemetry.Enabled {
+		telemetry.ReportJSON(ctx, s.logger, "action_response", observation)
 	}
 
 	c.JSON(http.StatusOK, observation)
@@ -179,9 +197,35 @@ func (s *Server) handleUploadFile(c *gin.Context) {
 		return
 	}
 
+	// Report upload request JSON in traces and logs
+	if s.config.Telemetry.Enabled {
+		uploadData := map[string]interface{}{
+			"path":         path,
+			"content_size": len(content),
+		}
+		telemetry.ReportJSON(ctx, s.logger, "file_upload_request", uploadData)
+	}
+
 	if err := s.executor.UploadFile(ctx, path, content); err != nil {
+		errorData := map[string]interface{}{
+			"path":  path,
+			"error": err.Error(),
+		}
+		if s.config.Telemetry.Enabled {
+			telemetry.ReportJSON(ctx, s.logger, "file_upload_error", errorData)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to upload file: %v", err)})
 		return
+	}
+
+	// Report successful upload
+	if s.config.Telemetry.Enabled {
+		successData := map[string]interface{}{
+			"path":         path,
+			"content_size": len(content),
+			"status":       "success",
+		}
+		telemetry.ReportJSON(ctx, s.logger, "file_upload_success", successData)
 	}
 
 	c.Status(http.StatusOK)
