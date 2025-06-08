@@ -56,7 +56,7 @@ type FileEditAction struct {
 // IPythonRunCellAction represents an IPython cell execution action
 type IPythonRunCellAction struct {
 	Action string `json:"action"`
-	Args struct {
+	Args   struct {
 		Code string `json:"code"`
 	}
 }
