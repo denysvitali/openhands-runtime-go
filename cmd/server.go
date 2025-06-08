@@ -70,8 +70,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Initialize telemetry if enabled
 	var cleanup func()
 	if cfg.Telemetry.Enabled {
-		logger.Info("Initializing OpenTelemetry")
-		cleanup, err = telemetry.Initialize(cfg.Telemetry)
+		logger.Info("Initializing OpenTelemetry with autoexport")
+		cleanup, err = telemetry.Initialize(cfg.Telemetry, logger)
 		if err != nil {
 			logger.Warnf("Failed to initialize telemetry: %v", err)
 		} else {
