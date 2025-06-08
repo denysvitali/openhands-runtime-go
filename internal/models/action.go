@@ -106,7 +106,7 @@ func ParseAction(actionMap map[string]interface{}) (interface{}, error) {
 		var action FileEditAction
 		err = json.Unmarshal(jsonData, &action)
 		return action, err
-	case "ipython":
+	case "run_ipython":
 		var action IPythonRunCellAction
 		err = json.Unmarshal(jsonData, &action)
 		return action, err
