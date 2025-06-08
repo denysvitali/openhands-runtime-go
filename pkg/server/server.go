@@ -161,12 +161,12 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 			Content:     fmt.Sprintf("Failed to execute action: %v", err),
 			Timestamp:   time.Now(),
 		}
-		
+
 		// Report error observation JSON in traces and logs
 		if s.config.Telemetry.Enabled {
 			telemetry.ReportJSON(ctx, s.logger, "action_error", errorObs)
 		}
-		
+
 		c.JSON(http.StatusInternalServerError, errorObs)
 		return
 	}

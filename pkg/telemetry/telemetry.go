@@ -11,8 +11,8 @@ import (
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/log/global"
 	otlplog "go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -75,11 +75,11 @@ func Initialize(cfg config.TelemetryConfig, logger *logrus.Logger) (func(), erro
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		if err := tp.Shutdown(ctx); err != nil {
 			log.Printf("Error shutting down tracer provider: %v", err)
 		}
-		
+
 		if logProvider != nil {
 			if err := logProvider.Shutdown(ctx); err != nil {
 				log.Printf("Error shutting down log provider: %v", err)
