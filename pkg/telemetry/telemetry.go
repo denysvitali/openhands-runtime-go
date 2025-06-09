@@ -77,9 +77,13 @@ func Initialize(cfg config.TelemetryConfig, logger *logrus.Logger) (func(), erro
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		tp.Shutdown(ctx)
+		if err := tp.Shutdown(ctx); err != nil {
+			logger.Warnf("Failed to shutdown trace provider: %v", err)
+		}
 		if logProvider != nil {
-			logProvider.Shutdown(ctx)
+			if err := logProvider.Shutdown(ctx); err != nil {
+				logger.Warnf("Failed to shutdown log provider: %v", err)
+			}
 		}
 	}, nil
 }
