@@ -174,6 +174,7 @@ mainLoop:
 			} else if cmdExitCode == 0 {
 				e.logger.Warnf("PWD not read from terminator for successful command '%s'. CWD may be stale.", action.Command)
 			}
+			break mainLoop
 		case <-cmdCtx.Done():
 			err := cmdCtx.Err()
 			e.logger.Warnf("Command '%s' context done (timeout/cancelled): %v", action.Command, err)
