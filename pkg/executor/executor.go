@@ -431,9 +431,9 @@ print("###IPYTHON_END###")
 	var imageURLs []string
 
 	if resultStartIdx != -1 && resultEndIdx != -1 {
-		jsonStr := outputStr[resultStartIdx+len("###IPYTHON_RESULT###"):resultEndIdx]
+		jsonStr := outputStr[resultStartIdx+len("###IPYTHON_RESULT###") : resultEndIdx]
 		jsonStr = strings.TrimSpace(jsonStr)
-		
+
 		if parseErr := json.Unmarshal([]byte(jsonStr), &result); parseErr == nil {
 			content = result.Stdout
 			if result.Stderr != "" {
