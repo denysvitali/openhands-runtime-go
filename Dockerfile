@@ -18,6 +18,7 @@ RUN apk --no-cache add \
     ca-certificates \
     bash \
     curl \
+    busybox \
     wget \
     git \
     go \
