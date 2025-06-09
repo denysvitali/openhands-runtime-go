@@ -23,6 +23,7 @@ RUN apk --no-cache add \
     git \
     go \
     golangci-lint \
+    nix \
     python3 \
     ipython \
     py3-pip \
