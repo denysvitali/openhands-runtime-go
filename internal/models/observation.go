@@ -45,11 +45,10 @@ type FileEditObservation struct {
 
 // IPythonRunCellObservation represents IPython execution output
 type IPythonRunCellObservation struct {
-	Observation string    `json:"observation"`
-	Code        string    `json:"code"`
-	Content     string    `json:"content"`
-	ImageURLs   []string  `json:"image_urls,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
+	Observation string                 `json:"observation"`
+	Content     string                 `json:"content"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Extras      map[string]interface{} `json:"extras,omitempty"`
 }
 
 // ErrorObservation represents an error

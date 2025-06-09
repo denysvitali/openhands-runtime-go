@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,12 +14,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/denysvitali/openhands-runtime-go/internal/models"
-	"github.com/denysvitali/openhands-runtime-go/pkg/config"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/denysvitali/openhands-runtime-go/internal/models"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
 )
 
 // Executor handles action execution
@@ -150,10 +152,9 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	output, err := cmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) {
 			exitCode = exitError.ExitCode()
-		} else {
-			exitCode = 1
 		}
 	}
 
@@ -340,7 +341,9 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 			Timestamp:   time.Now(),
 		}, nil
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
 
 	// Write IPython execution wrapper to the temporary file
 	wrapperCode := fmt.Sprintf(`
@@ -397,14 +400,14 @@ print("###IPYTHON_END###")
 `, action.Code)
 
 	if _, err := tmpFile.WriteString(wrapperCode); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write to temporary file: %v", err),
 			Timestamp:   time.Now(),
 		}, nil
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	// Execute the Python script
 	cmd := exec.CommandContext(ctx, "python3", tmpFile.Name())
@@ -468,9 +471,15 @@ print("###IPYTHON_END###")
 	observation := models.IPythonRunCellObservation{
 		Observation: "run_ipython",
 		Content:     content,
-		Code:        action.Code,
-		ImageURLs:   imageURLs,
 		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"code": action.Code,
+		},
+	}
+
+	// Add image URLs to extras if present
+	if len(imageURLs) > 0 {
+		observation.Extras["image_urls"] = imageURLs
 	}
 
 	e.logger.Infof("Created IPython observation: %+v", observation)
