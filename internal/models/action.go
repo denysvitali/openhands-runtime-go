@@ -105,10 +105,35 @@ func ParseAction(actionMap map[string]interface{}) (interface{}, error) {
 		return nil, fmt.Errorf("'action' field is not a string, got %T", actionTypeVal)
 	}
 
-	// Convert map to JSON to leverage struct tags for unmarshalling
-	jsonData, err := json.Marshal(actionMap)
+	// mapForUnmarshalling will contain the actual parameters for the action.
+	// It will be a "flat" map, suitable for unmarshalling into specific action structs.
+	mapForUnmarshalling := make(map[string]interface{})
+
+	if argsVal, foundArgs := actionMap["args"]; foundArgs {
+		if argsActualMap, isMap := argsVal.(map[string]interface{}); isMap {
+			// Parameters are nested under "args"
+			for k, v := range argsActualMap {
+				mapForUnmarshalling[k] = v
+			}
+		} else {
+			// "args" field is present but not a map, which is an invalid structure.
+			return nil, fmt.Errorf("'args' field is present but is not a map[string]interface{}, got %T", argsVal)
+		}
+	} else {
+		// No "args" field, assume actionMap is already flat.
+		// Copy all fields from the original actionMap.
+		for k, v := range actionMap {
+			mapForUnmarshalling[k] = v
+		}
+	}
+
+	// Ensure the "action" type field itself is part of the map to be unmarshalled,
+	// as specific action structs (e.g., CmdRunAction) also have an "action" field.
+	mapForUnmarshalling["action"] = actionType
+
+	jsonData, err := json.Marshal(mapForUnmarshalling)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal actionMap to JSON: %w", err)
+		return nil, fmt.Errorf("failed to marshal mapForUnmarshalling to JSON: %w", err)
 	}
 
 	switch actionType {
@@ -127,8 +152,13 @@ func ParseAction(actionMap map[string]interface{}) (interface{}, error) {
 	case "browse_interactive":
 		return genericUnmarshalAction[BrowseInteractiveAction](jsonData)
 	default:
-		// For unknown action types, parse as a base Action struct.
-		// The calling Executor will then handle it as an unsupported action.
-		return genericUnmarshalAction[Action](jsonData)
+		// For unknown action types, parse into the base Action struct.
+		// The base Action struct expects an "action" field and an "args" field (if present in original).
+		// Therefore, for the default case, we should marshal the original actionMap.
+		originalJsonData, err := json.Marshal(actionMap)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal original actionMap to JSON for default case: %w", err)
+		}
+		return genericUnmarshalAction[Action](originalJsonData)
 	}
 }
