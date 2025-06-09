@@ -104,17 +104,24 @@ func (e *Executor) handleStdoutReader(cmdCtx context.Context, outputChan chan st
 	cmdOutputChan := make(chan string, 64)
 
 	// Register with the distributor
+	e.logger.Debugf("Registering command output channel for cmdID: %s", cmdID)
 	e.registerCommandOutputChannel(cmdID, cmdOutputChan)
-	defer e.unregisterCommandOutputChannel(cmdID)
+	defer func() {
+		e.logger.Debugf("Unregistering command output channel for cmdID: %s", cmdID)
+		e.unregisterCommandOutputChannel(cmdID)
+	}()
 
 	for {
 		select {
 		case line, ok := <-cmdOutputChan:
 			if !ok {
 				// Channel was closed, likely due to bash session ending
+				e.logger.Debugf("Command output channel closed for cmdID: %s", cmdID)
 				return
 			}
+			e.logger.Debugf("Received line for cmdID %s: %s", cmdID, line)
 			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				e.logger.Debugf("Found terminator line for cmdID %s: %s", cmdID, line)
 				e.parseTerminatorLine(line, cmdExitCode, newPwdFromTerminator)
 				close(doneChan)
 				return
@@ -122,9 +129,11 @@ func (e *Executor) handleStdoutReader(cmdCtx context.Context, outputChan chan st
 			select {
 			case outputChan <- line + "\n":
 			case <-cmdCtx.Done():
+				e.logger.Debugf("Context cancelled for cmdID: %s", cmdID)
 				return
 			}
 		case <-cmdCtx.Done():
+			e.logger.Debugf("Context done for cmdID: %s", cmdID)
 			return
 		}
 	}
@@ -132,19 +141,57 @@ func (e *Executor) handleStdoutReader(cmdCtx context.Context, outputChan chan st
 
 // handleStderrReader processes stderr output
 func (e *Executor) handleStderrReader(cmdCtx context.Context, outputChan chan string, doneChan chan struct{}) {
-	stderrScanner := bufio.NewScanner(e.bashStderr)
-	for stderrScanner.Scan() {
-		line := stderrScanner.Text()
+	// For stderr, we don't wait for a terminator line since bash commands
+	// typically only output terminators to stdout. We just read any stderr
+	// that appears and exit when the command is done.
+
+	stderrLines := make(chan string, 16)
+	scanDone := make(chan struct{})
+
+	// Start a goroutine to scan stderr
+	go func() {
+		defer close(stderrLines)
+		defer close(scanDone)
+
+		stderrScanner := bufio.NewScanner(e.bashStderr)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			select {
+			case stderrLines <- line:
+			case <-doneChan:
+				return
+			case <-cmdCtx.Done():
+				return
+			}
+		}
+		if err := stderrScanner.Err(); err != nil {
+			e.logger.Debugf("stderr scan finished with error: %v", err)
+		}
+	}()
+
+	// Process stderr lines until command completes
+	for {
 		select {
-		case outputChan <- line + "\n":
-		case <-cmdCtx.Done():
-			return
+		case line, ok := <-stderrLines:
+			if !ok {
+				// Stderr scanner finished
+				return
+			}
+			select {
+			case outputChan <- line + "\n":
+			case <-cmdCtx.Done():
+				return
+			case <-doneChan:
+				return
+			}
 		case <-doneChan:
+			// Command completed, we can exit
+			e.logger.Debugf("Command completed, stderr reader exiting")
+			return
+		case <-cmdCtx.Done():
+			e.logger.Debugf("Context cancelled, stderr reader exiting")
 			return
 		}
-	}
-	if err := stderrScanner.Err(); err != nil {
-		e.logger.Errorf("stderr scan error: %v", err)
 	}
 }
 
@@ -250,7 +297,9 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 
 	wg := e.startOutputReaders(cmdCtx, outputChan, errChan, doneChan, &cmdExitCode, &newPwdFromTerminator, cmdID)
 
+	e.logger.Debugf("Writing command to bash stdin for cmdID %s: %s", cmdID, wrappedCommand)
 	if _, err := e.bashStdin.Write([]byte(wrappedCommand)); err != nil {
+		e.logger.Errorf("Failed to write command to bash stdin for cmdID %s: %v", cmdID, err)
 		span.RecordError(err)
 		if cancelCmd != nil {
 			cancelCmd()

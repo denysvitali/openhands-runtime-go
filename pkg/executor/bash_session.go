@@ -77,12 +77,15 @@ func (e *Executor) initBashSession() error {
 
 // handleBashStdout handles stdout from the bash session continuously
 func (e *Executor) handleBashStdout() {
+	e.logger.Debug("Starting handleBashStdout goroutine")
 	scanner := bufio.NewScanner(e.bashStdout)
 	for scanner.Scan() {
 		line := scanner.Text()
+		e.logger.Debugf("handleBashStdout read line: %s", line)
 		select {
 		case e.stdoutLines <- line:
 			// Line sent to distributor
+			e.logger.Debugf("Line sent to stdoutLines channel: %s", line)
 		default:
 			// Channel is full, log and discard to prevent blocking
 			e.logger.Warnf("Stdout channel full, discarding line: %s", line)
@@ -91,6 +94,7 @@ func (e *Executor) handleBashStdout() {
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		e.logger.Errorf("Error reading bash stdout: %v", err)
 	}
+	e.logger.Debug("handleBashStdout goroutine exiting")
 	close(e.stdoutLines)
 }
 
@@ -115,13 +119,14 @@ func (e *Executor) stdoutDistributor() {
 			e.outputMutex.RLock()
 			hasActiveChannels := len(e.cmdOutputChans) > 0
 			if hasActiveChannels {
+				e.logger.Debugf("Distributing line to %d active command channels: %s", len(e.cmdOutputChans), line)
 				for cmdID, outputChan := range e.cmdOutputChans {
 					select {
 					case outputChan <- line:
-						// Line sent to command handler
+						e.logger.Debugf("Line sent to command %s: %s", cmdID, line)
 					default:
-						// Command channel is full, log but continue
-						e.logger.Warnf("Command %s output channel full, discarding line: %s", cmdID, line)
+						// Command channel is full or closed, log but continue
+						e.logger.Warnf("Command %s output channel full or closed, discarding line: %s", cmdID, line)
 					}
 				}
 			} else {
@@ -131,6 +136,7 @@ func (e *Executor) stdoutDistributor() {
 			e.outputMutex.RUnlock()
 		}
 	}
+	e.logger.Info("stdoutDistributor exiting")
 }
 
 // handleBashStderr handles stderr from the bash session during initialization
@@ -226,5 +232,9 @@ func (e *Executor) registerCommandOutputChannel(cmdID string, outputChan chan st
 func (e *Executor) unregisterCommandOutputChannel(cmdID string) {
 	e.outputMutex.Lock()
 	defer e.outputMutex.Unlock()
-	delete(e.cmdOutputChans, cmdID)
+	if ch, exists := e.cmdOutputChans[cmdID]; exists {
+		delete(e.cmdOutputChans, cmdID)
+		// Close the channel to signal any remaining readers
+		close(ch)
+	}
 }
