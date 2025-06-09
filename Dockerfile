@@ -38,7 +38,6 @@ RUN addgroup -g 1001 -S openhands && \
 WORKDIR /workspace
 
 COPY --from=builder /app/openhands-runtime-go /app/
-RUN chown openhands:openhands openhands-runtime-go
 USER openhands
 EXPOSE 8000
 
