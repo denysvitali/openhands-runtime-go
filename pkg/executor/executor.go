@@ -163,9 +163,11 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	return models.CmdOutputObservation{
 		Observation: "run",
 		Content:     string(output),
-		Command:     action.Command,
-		ExitCode:    exitCode,
 		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"command":   action.Command,
+			"exit_code": exitCode,
+		},
 	}, nil
 }
 

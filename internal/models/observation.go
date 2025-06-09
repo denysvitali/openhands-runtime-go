@@ -12,11 +12,10 @@ type Observation struct {
 
 // CmdOutputObservation represents command execution output
 type CmdOutputObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	Command     string    `json:"command"`
-	ExitCode    int       `json:"exit_code"`
-	Timestamp   time.Time `json:"timestamp"`
+	Observation string                 `json:"observation"`
+	Content     string                 `json:"content"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Extras      map[string]interface{} `json:"extras"`
 }
 
 // FileReadObservation represents file read output

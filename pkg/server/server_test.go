@@ -123,8 +123,8 @@ func TestHandleExecuteAction_CmdRun_Success(t *testing.T) {
 
 	assert.Equal(t, "run", resp.Observation)
 	assert.Contains(t, resp.Content, "hello world")
-	assert.Equal(t, "echo 'hello world'", resp.Command)
-	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "echo 'hello world'", resp.Extras["command"])
+	assert.Equal(t, 0.0, resp.Extras["exit_code"])
 }
 
 func TestHandleExecuteAction_InvalidJSON(t *testing.T) {
