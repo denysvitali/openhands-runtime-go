@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -536,17 +538,89 @@ func (e *Executor) GetServerInfo() models.ServerInfo {
 	}
 }
 
-// GetSystemStats returns system statistics (simplified implementation)
+// GetSystemStats returns system statistics using gopsutil
 func (e *Executor) GetSystemStats() models.SystemStats {
-	// This is a simplified implementation
-	// In a real implementation, you'd use proper system monitoring libraries
+	// Get current process
+	pid := int32(os.Getpid())
+	proc, err := process.NewProcess(pid)
+	if err != nil {
+		e.logger.Warnf("Failed to get process info: %v", err)
+		return models.SystemStats{
+			CPUPercent: 0.0,
+			Memory: models.MemoryStats{
+				RSS:     0,
+				VMS:     0,
+				Percent: 0.0,
+			},
+			Disk: models.DiskStats{
+				Total:   0,
+				Used:    0,
+				Free:    0,
+				Percent: 0.0,
+			},
+			IO: models.IOStats{
+				ReadBytes:  0,
+				WriteBytes: 0,
+			},
+		}
+	}
+
+	// Get CPU percentage for this process
+	cpuPercent, err := proc.CPUPercent()
+	if err != nil {
+		e.logger.Warnf("Failed to get CPU percent: %v", err)
+		cpuPercent = 0.0
+	}
+
+	// Get memory info for this process
+	memInfo, err := proc.MemoryInfo()
+	if err != nil {
+		e.logger.Warnf("Failed to get memory info: %v", err)
+		memInfo = &process.MemoryInfoStat{RSS: 0, VMS: 0}
+	}
+
+	// Get memory percentage for this process
+	memPercent, err := proc.MemoryPercent()
+	if err != nil {
+		e.logger.Warnf("Failed to get memory percent: %v", err)
+		memPercent = 0.0
+	}
+
+	// Get disk usage for the working directory
+	workingDir := e.workingDir
+	if workingDir == "" {
+		workingDir = "/"
+	}
+	diskUsage, err := disk.Usage(workingDir)
+	if err != nil {
+		e.logger.Warnf("Failed to get disk usage: %v", err)
+		diskUsage = &disk.UsageStat{Total: 0, Used: 0, Free: 0, UsedPercent: 0.0}
+	}
+
+	// Get I/O stats for this process
+	ioCounters, err := proc.IOCounters()
+	if err != nil {
+		e.logger.Warnf("Failed to get IO counters: %v", err)
+		ioCounters = &process.IOCountersStat{ReadBytes: 0, WriteBytes: 0}
+	}
+
 	return models.SystemStats{
-		CPUPercent:    0.0,
-		MemoryPercent: 0.0,
-		MemoryUsedMB:  1024.0,  // 1GB used
-		MemoryTotalMB: 4096.0,  // 4GB total
-		DiskUsedMB:    10240.0, // 10GB used
-		DiskTotalMB:   51200.0, // 50GB total
+		CPUPercent: cpuPercent,
+		Memory: models.MemoryStats{
+			RSS:     memInfo.RSS,
+			VMS:     memInfo.VMS,
+			Percent: memPercent,
+		},
+		Disk: models.DiskStats{
+			Total:   diskUsage.Total,
+			Used:    diskUsage.Used,
+			Free:    diskUsage.Free,
+			Percent: diskUsage.UsedPercent,
+		},
+		IO: models.IOStats{
+			ReadBytes:  ioCounters.ReadBytes,
+			WriteBytes: ioCounters.WriteBytes,
+		},
 	}
 }
 

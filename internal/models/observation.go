@@ -100,14 +100,33 @@ type ServerInfo struct {
 	SystemStats   SystemStats `json:"system_stats"`
 }
 
-// SystemStats represents system statistics
+// SystemStats represents system statistics that match Python's get_system_stats output
 type SystemStats struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryPercent float64 `json:"memory_percent"`
-	MemoryUsedMB  float64 `json:"memory_used_mb"`
-	MemoryTotalMB float64 `json:"memory_total_mb"`
-	DiskUsedMB    float64 `json:"disk_used_mb"`
-	DiskTotalMB   float64 `json:"disk_total_mb"`
+	CPUPercent float64     `json:"cpu_percent"`
+	Memory     MemoryStats `json:"memory"`
+	Disk       DiskStats   `json:"disk"`
+	IO         IOStats     `json:"io"`
+}
+
+// MemoryStats represents memory usage statistics
+type MemoryStats struct {
+	RSS     uint64  `json:"rss"`     // Resident Set Size in bytes
+	VMS     uint64  `json:"vms"`     // Virtual Memory Size in bytes
+	Percent float32 `json:"percent"` // Memory usage percentage
+}
+
+// DiskStats represents disk usage statistics
+type DiskStats struct {
+	Total   uint64  `json:"total"`   // Total disk space in bytes
+	Used    uint64  `json:"used"`    // Used disk space in bytes
+	Free    uint64  `json:"free"`    // Free disk space in bytes
+	Percent float64 `json:"percent"` // Disk usage percentage
+}
+
+// IOStats represents I/O statistics
+type IOStats struct {
+	ReadBytes  uint64 `json:"read_bytes"`  // Total bytes read
+	WriteBytes uint64 `json:"write_bytes"` // Total bytes written
 }
 
 // UploadResponse represents file upload response

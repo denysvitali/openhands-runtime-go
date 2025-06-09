@@ -151,12 +151,12 @@ func (s *Server) handleServerInfo(c *gin.Context) {
 	resources := models.SystemResources{
 		CPUCount:      runtime.NumCPU(),
 		CPUPercent:    systemStats.CPUPercent,
-		MemoryTotal:   int64(systemStats.MemoryTotalMB * 1024 * 1024), // Convert MB to bytes
-		MemoryUsed:    int64(systemStats.MemoryUsedMB * 1024 * 1024),  // Convert MB to bytes
-		MemoryPercent: systemStats.MemoryPercent,
-		DiskTotal:     int64(systemStats.DiskTotalMB * 1024 * 1024), // Convert MB to bytes
-		DiskUsed:      int64(systemStats.DiskUsedMB * 1024 * 1024),  // Convert MB to bytes
-		DiskPercent:   (systemStats.DiskUsedMB / systemStats.DiskTotalMB) * 100,
+		MemoryTotal:   int64(systemStats.Memory.RSS + systemStats.Memory.VMS), // Use RSS + VMS as total
+		MemoryUsed:    int64(systemStats.Memory.RSS),                          // Use RSS as used
+		MemoryPercent: float64(systemStats.Memory.Percent),
+		DiskTotal:     int64(systemStats.Disk.Total),
+		DiskUsed:      int64(systemStats.Disk.Used),
+		DiskPercent:   systemStats.Disk.Percent,
 	}
 
 	// Create response matching Python format
