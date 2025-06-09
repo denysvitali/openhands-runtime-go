@@ -32,16 +32,14 @@ RUN apk --no-cache add \
 
 RUN addgroup -g 1001 -S openhands && \
     adduser -u 1001 -S openhands -G openhands && \
-    mkdir -p /workspace && \
-    chown openhands:openhands /workspace
+    mkdir -p /workspace /app && \
+    chown openhands:openhands /workspace /app
 
 WORKDIR /workspace
 
-COPY --from=builder /app/openhands-runtime-go .
+COPY --from=builder /app/openhands-runtime-go /app/
 RUN chown openhands:openhands openhands-runtime-go
-
 USER openhands
-
 EXPOSE 8000
 
 CMD ["/app/openhands-runtime-go", "server"]
