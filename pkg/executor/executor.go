@@ -37,19 +37,26 @@ type Executor struct {
 	bashStderr     *bufio.Reader
 	bashMutex      sync.Mutex
 	currentBashCwd string
+
+	// Stdout distribution channels
+	stdoutLines    chan string
+	cmdOutputChans map[string]chan string
+	outputMutex    sync.RWMutex
 }
 
 // New creates a new executor
 func New(cfg *config.Config, logger *logrus.Logger) (*Executor, error) {
 	executor := &Executor{
-		config:       cfg,
-		logger:       logger,
-		workingDir:   cfg.Server.WorkingDir,
-		username:     cfg.Server.Username,
-		userID:       cfg.Server.UserID,
-		startTime:    time.Now(),
-		lastExecTime: time.Now(),
-		tracer:       otel.Tracer("openhands-runtime"),
+		config:         cfg,
+		logger:         logger,
+		workingDir:     cfg.Server.WorkingDir,
+		username:       cfg.Server.Username,
+		userID:         cfg.Server.UserID,
+		startTime:      time.Now(),
+		lastExecTime:   time.Now(),
+		tracer:         otel.Tracer("openhands-runtime"),
+		stdoutLines:    make(chan string, 256),
+		cmdOutputChans: make(map[string]chan string),
 	}
 
 	if err := executor.initWorkingDirectory(); err != nil {

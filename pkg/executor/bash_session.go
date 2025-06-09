@@ -70,27 +70,66 @@ func (e *Executor) initBashSession() error {
 	// Start goroutines to handle stdout and stderr
 	go e.handleBashStdout()
 	go e.handleBashStderr()
+	go e.stdoutDistributor()
 
 	return nil
 }
 
-// handleBashStdout handles stdout from the bash session during initialization
+// handleBashStdout handles stdout from the bash session continuously
 func (e *Executor) handleBashStdout() {
 	scanner := bufio.NewScanner(e.bashStdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-		e.logger.Debugf("Bash init stdout: %s", line)
-		if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
-			fields := strings.Fields(strings.TrimPrefix(line, bashCommandTerminatorPrefix))
-			if len(fields) >= 2 {
-				e.currentBashCwd = strings.Join(fields[1:], " ")
-				e.logger.Infof("Bash initial CWD set to: %s", e.currentBashCwd)
-			}
-			return
+		select {
+		case e.stdoutLines <- line:
+			// Line sent to distributor
+		default:
+			// Channel is full, log and discard to prevent blocking
+			e.logger.Warnf("Stdout channel full, discarding line: %s", line)
 		}
 	}
 	if err := scanner.Err(); err != nil && err != io.EOF {
-		e.logger.Warnf("Error reading bash init stdout: %v", err)
+		e.logger.Errorf("Error reading bash stdout: %v", err)
+	}
+	close(e.stdoutLines)
+}
+
+// stdoutDistributor distributes stdout lines to appropriate handlers
+func (e *Executor) stdoutDistributor() {
+	initializationComplete := false
+
+	for line := range e.stdoutLines {
+		if !initializationComplete {
+			e.logger.Debugf("Bash init stdout: %s", line)
+			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				fields := strings.Fields(strings.TrimPrefix(line, bashCommandTerminatorPrefix))
+				if len(fields) >= 2 {
+					e.currentBashCwd = strings.Join(fields[1:], " ")
+					e.logger.Infof("Bash initial CWD set to: %s", e.currentBashCwd)
+				}
+				initializationComplete = true
+				continue
+			}
+		} else {
+			// After initialization, distribute to active command channels or discard
+			e.outputMutex.RLock()
+			hasActiveChannels := len(e.cmdOutputChans) > 0
+			if hasActiveChannels {
+				for cmdID, outputChan := range e.cmdOutputChans {
+					select {
+					case outputChan <- line:
+						// Line sent to command handler
+					default:
+						// Command channel is full, log but continue
+						e.logger.Warnf("Command %s output channel full, discarding line: %s", cmdID, line)
+					}
+				}
+			} else {
+				// No active commands, just discard to keep pipe drained
+				e.logger.Debugf("Background bash stdout (discarded): %s", line)
+			}
+			e.outputMutex.RUnlock()
+		}
 	}
 }
 
@@ -174,4 +213,18 @@ func (e *Executor) killBashProcessGroup() error {
 		}
 	}
 	return nil
+}
+
+// registerCommandOutputChannel registers a channel to receive stdout for a specific command
+func (e *Executor) registerCommandOutputChannel(cmdID string, outputChan chan string) {
+	e.outputMutex.Lock()
+	defer e.outputMutex.Unlock()
+	e.cmdOutputChans[cmdID] = outputChan
+}
+
+// unregisterCommandOutputChannel removes a command's output channel
+func (e *Executor) unregisterCommandOutputChannel(cmdID string) {
+	e.outputMutex.Lock()
+	defer e.outputMutex.Unlock()
+	delete(e.cmdOutputChans, cmdID)
 }

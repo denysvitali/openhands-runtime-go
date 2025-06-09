@@ -67,7 +67,7 @@ func (e *Executor) setupCommandExecution(ctx context.Context, hardTimeout int) (
 }
 
 // startOutputReaders starts the goroutines for reading stdout and stderr
-func (e *Executor) startOutputReaders(cmdCtx context.Context, outputChan chan string, errChan chan error, doneChan chan struct{}, cmdExitCode *int, newPwdFromTerminator *string) *sync.WaitGroup {
+func (e *Executor) startOutputReaders(cmdCtx context.Context, outputChan chan string, errChan chan error, doneChan chan struct{}, cmdExitCode *int, newPwdFromTerminator *string, cmdID string) *sync.WaitGroup {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -80,7 +80,7 @@ func (e *Executor) startOutputReaders(cmdCtx context.Context, outputChan chan st
 				errChan <- fmt.Errorf("panic in stdout reader: %v", r)
 			}
 		}()
-		e.handleStdoutReader(cmdCtx, outputChan, doneChan, cmdExitCode, newPwdFromTerminator)
+		e.handleStdoutReader(cmdCtx, outputChan, doneChan, cmdExitCode, newPwdFromTerminator, cmdID)
 	}()
 
 	// Handle stderr
@@ -98,24 +98,35 @@ func (e *Executor) startOutputReaders(cmdCtx context.Context, outputChan chan st
 	return &wg
 }
 
-// handleStdoutReader processes stdout and looks for command termination
-func (e *Executor) handleStdoutReader(cmdCtx context.Context, outputChan chan string, doneChan chan struct{}, cmdExitCode *int, newPwdFromTerminator *string) {
-	stdoutScanner := bufio.NewScanner(e.bashStdout)
-	for stdoutScanner.Scan() {
-		line := stdoutScanner.Text()
-		if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
-			e.parseTerminatorLine(line, cmdExitCode, newPwdFromTerminator)
-			close(doneChan)
-			return
-		}
+// handleStdoutReader processes stdout and looks for command termination using the channel distributor
+func (e *Executor) handleStdoutReader(cmdCtx context.Context, outputChan chan string, doneChan chan struct{}, cmdExitCode *int, newPwdFromTerminator *string, cmdID string) {
+	// Create a channel to receive stdout lines for this command
+	cmdOutputChan := make(chan string, 64)
+
+	// Register with the distributor
+	e.registerCommandOutputChannel(cmdID, cmdOutputChan)
+	defer e.unregisterCommandOutputChannel(cmdID)
+
+	for {
 		select {
-		case outputChan <- line + "\n":
+		case line, ok := <-cmdOutputChan:
+			if !ok {
+				// Channel was closed, likely due to bash session ending
+				return
+			}
+			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				e.parseTerminatorLine(line, cmdExitCode, newPwdFromTerminator)
+				close(doneChan)
+				return
+			}
+			select {
+			case outputChan <- line + "\n":
+			case <-cmdCtx.Done():
+				return
+			}
 		case <-cmdCtx.Done():
 			return
 		}
-	}
-	if err := stdoutScanner.Err(); err != nil {
-		e.logger.Errorf("stdout scan error: %v", err)
 	}
 }
 
@@ -234,7 +245,10 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	var cmdExitCode = -1
 	var newPwdFromTerminator string
 
-	wg := e.startOutputReaders(cmdCtx, outputChan, errChan, doneChan, &cmdExitCode, &newPwdFromTerminator)
+	// Generate a unique command ID for this execution
+	cmdID := fmt.Sprintf("cmd_%d", time.Now().UnixNano())
+
+	wg := e.startOutputReaders(cmdCtx, outputChan, errChan, doneChan, &cmdExitCode, &newPwdFromTerminator, cmdID)
 
 	if _, err := e.bashStdin.Write([]byte(wrappedCommand)); err != nil {
 		span.RecordError(err)
