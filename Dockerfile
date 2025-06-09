@@ -44,4 +44,4 @@ USER openhands
 
 EXPOSE 8000
 
-CMD ["./openhands-runtime-go", "server"]
+CMD ["/app/openhands-runtime-go", "server"]
