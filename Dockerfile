@@ -30,15 +30,17 @@ RUN apk --no-cache add \
     py3-matplotlib \
     py3-seaborn
 
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+RUN addgroup -g 1001 -S openhands && \
+    adduser -u 1001 -S openhands -G openhands && \
+    mkdir -p /workspace && \
+    chown openhands:openhands /workspace
 
-WORKDIR /root/
+WORKDIR /workspace
 
 COPY --from=builder /app/openhands-runtime-go .
-RUN chown appuser:appgroup openhands-runtime-go
+RUN chown openhands:openhands openhands-runtime-go
 
-USER appuser
+USER openhands
 
 EXPOSE 8000
 
