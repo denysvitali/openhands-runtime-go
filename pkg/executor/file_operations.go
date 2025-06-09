@@ -106,7 +106,6 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 			Observation: "error",
 			Content:     fmt.Sprintf("File not found: %s. Your current working directory is %s.", path, cwd),
 			ErrorType:   "FileReadError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -127,7 +126,6 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 			Observation: "error",
 			Content:     content,
 			ErrorType:   "FileReadError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -138,7 +136,6 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 			Observation: "error",
 			Content:     "ERROR_BINARY_FILE",
 			ErrorType:   "BinaryFileError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -159,7 +156,6 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 			Observation: "error",
 			Content:     errorContent,
 			ErrorType:   "FileReadError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -203,7 +199,6 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to create directory for %s: %v", path, err),
 			ErrorType:   "DirectoryCreationError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -214,7 +209,6 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write file %s: %v", path, err),
 			ErrorType:   "FileWriteError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -273,7 +267,6 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to read file %s: %v", path, err),
 			ErrorType:   "FileReadError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -286,7 +279,6 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write file %s: %v", path, err),
 			ErrorType:   "FileWriteError",
-			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
