@@ -3,7 +3,6 @@ package telemetry
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/pkg/config"
@@ -22,35 +21,37 @@ import (
 
 // Initialize sets up OpenTelemetry tracing and logging using autoexport
 func Initialize(cfg config.TelemetryConfig, logger *logrus.Logger) (func(), error) {
-	// Create resource
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
+	// Create resource with service info
+	res, err := resource.New(context.Background(),
+		resource.WithAttributes(
 			semconv.ServiceNameKey.String("openhands-runtime"),
 			semconv.ServiceVersionKey.String("1.0.0"),
 		),
+		resource.WithFromEnv(),
+		resource.WithTelemetrySDK(),
+		resource.WithProcess(),
+		resource.WithOS(),
+		resource.WithContainer(),
+		resource.WithHost(),
 	)
 	if err != nil {
-		return nil, err
+		logger.Warnf("Failed to create resource: %v", err)
+		res = resource.Default()
 	}
 
-	// Initialize trace provider using autoexport
-	traceShutdown, err := autoexport.NewSpanExporter(context.Background())
+	// Initialize trace provider
+	traceExporter, err := autoexport.NewSpanExporter(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceShutdown),
+		sdktrace.WithBatcher(traceExporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
-
-	// Set global trace provider
 	otel.SetTracerProvider(tp)
 
-	// Initialize log provider using autoexport
+	// Initialize log provider
 	logExporter, err := autoexport.NewLogExporter(context.Background())
 	if err != nil {
 		logger.Warnf("Failed to create log exporter: %v", err)
@@ -65,7 +66,7 @@ func Initialize(cfg config.TelemetryConfig, logger *logrus.Logger) (func(), erro
 		global.SetLoggerProvider(logProvider)
 	}
 
-	// Set global propagator
+	// Set propagator
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{},
 		propagation.Baggage{},
@@ -76,14 +77,9 @@ func Initialize(cfg config.TelemetryConfig, logger *logrus.Logger) (func(), erro
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if err := tp.Shutdown(ctx); err != nil {
-			log.Printf("Error shutting down tracer provider: %v", err)
-		}
-
+		tp.Shutdown(ctx)
 		if logProvider != nil {
-			if err := logProvider.Shutdown(ctx); err != nil {
-				log.Printf("Error shutting down log provider: %v", err)
-			}
+			logProvider.Shutdown(ctx)
 		}
 	}, nil
 }
