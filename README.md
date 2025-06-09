@@ -30,7 +30,7 @@ docker build -t openhands-runtime-go .
 docker run -p 8000:8000 openhands-runtime-go
 ```
 
-## Docker Hub
+## Docker Image
 
 The Docker image is automatically built and published to GitHub Container Registry (GHCR) for both `linux/amd64` and `linux/arm64` architectures.
 
