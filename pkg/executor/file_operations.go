@@ -24,7 +24,11 @@ func (e *Executor) readFileInitialChunk(path string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to open file %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			e.logger.Warnf("Failed to close file %s: %v", path, closeErr)
+		}
+	}()
 
 	buffer := make([]byte, 1024)
 	n, readErr := file.Read(buffer)

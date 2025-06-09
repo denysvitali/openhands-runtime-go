@@ -231,7 +231,7 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		}
 	}()
 
-	var cmdExitCode int = -1
+	var cmdExitCode = -1
 	var newPwdFromTerminator string
 
 	wg := e.startOutputReaders(cmdCtx, outputChan, errChan, doneChan, &cmdExitCode, &newPwdFromTerminator)

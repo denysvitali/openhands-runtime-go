@@ -117,12 +117,13 @@ func (e *Executor) closeBashSession() error {
 
 	if e.bashCmd != nil {
 		e.logger.Info("Closing persistent bash session...")
-		if e.bashStdin != nil {
-			_, err := e.bashStdin.Write([]byte("exit\n"))
-			if err != nil {
-				e.logger.Warnf("Failed to send exit command to bash: %v", err)
-			}
-			e.bashStdin.Close()
+		if e.bashStdin != nil {		_, err := e.bashStdin.Write([]byte("exit\n"))
+		if err != nil {
+			e.logger.Warnf("Failed to send exit command to bash: %v", err)
+		}
+		if err := e.bashStdin.Close(); err != nil {
+			e.logger.Warnf("Failed to close bash stdin: %v", err)
+		}
 		}
 
 		if e.bashCmd.Process != nil {
