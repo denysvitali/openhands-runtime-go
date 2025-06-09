@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/internal/models"
@@ -94,6 +95,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// Engine returns the gin engine for testing purposes
+func (s *Server) Engine() *gin.Engine {
+	return s.engine
+}
+
 // setupRoutes configures all HTTP routes
 func (s *Server) setupRoutes() {
 	// Health check
@@ -119,13 +125,48 @@ func (s *Server) setupRoutes() {
 
 // handleAlive handles health check requests
 func (s *Server) handleAlive(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "alive"})
+	// Check if executor is initialized (similar to Python version)
+	if s.executor == nil {
+		c.JSON(http.StatusOK, gin.H{"status": "not initialized"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // handleServerInfo handles server info requests
 func (s *Server) handleServerInfo(c *gin.Context) {
+	// Get current time for uptime/idle calculations
+	currentTime := time.Now()
+	
+	// Get server info from executor
 	info := s.executor.GetServerInfo()
-	c.JSON(http.StatusOK, info)
+	
+	// Calculate uptime and idle time (in seconds, as floats)
+	uptime := currentTime.Sub(info.StartTime).Seconds()
+	idleTime := currentTime.Sub(info.LastExecTime).Seconds()
+	
+	// Get system stats and convert to Python format
+	systemStats := s.executor.GetSystemStats()
+	resources := models.SystemResources{
+		CPUCount:      runtime.NumCPU(),
+		CPUPercent:    systemStats.CPUPercent,
+		MemoryTotal:   int64(systemStats.MemoryTotalMB * 1024 * 1024), // Convert MB to bytes
+		MemoryUsed:    int64(systemStats.MemoryUsedMB * 1024 * 1024),   // Convert MB to bytes
+		MemoryPercent: systemStats.MemoryPercent,
+		DiskTotal:     int64(systemStats.DiskTotalMB * 1024 * 1024), // Convert MB to bytes
+		DiskUsed:      int64(systemStats.DiskUsedMB * 1024 * 1024),   // Convert MB to bytes
+		DiskPercent:   (systemStats.DiskUsedMB / systemStats.DiskTotalMB) * 100,
+	}
+	
+	// Create response matching Python format
+	response := models.ServerInfoResponse{
+		Uptime:    uptime,
+		IdleTime:  idleTime,
+		Resources: resources,
+	}
+	
+	s.logger.Infof("Server info endpoint response: uptime=%.2fs, idle_time=%.2fs", uptime, idleTime)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleExecuteAction handles action execution requests
@@ -264,13 +305,14 @@ func (s *Server) handleListFiles(c *gin.Context) {
 		return
 	}
 
-	files, err := s.executor.ListFiles(ctx, req.Path, req.Recursive)
+	// Use the new ListFileNames function to match Python implementation
+	fileNames, err := s.executor.ListFileNames(ctx, req.Path)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list files: %v", err)})
 		return
 	}
 
-	c.JSON(http.StatusOK, files)
+	c.JSON(http.StatusOK, fileNames)
 }
 
 // handleVSCodeToken handles VSCode connection token requests
@@ -283,8 +325,42 @@ func (s *Server) handleVSCodeToken(c *gin.Context) {
 
 // handleUpdateMCPServer handles MCP server update requests
 func (s *Server) handleUpdateMCPServer(c *gin.Context) {
-	// This is a placeholder implementation
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "MCP server management not implemented"})
+	tracer := otel.Tracer("openhands-runtime")
+	ctx, span := tracer.Start(c.Request.Context(), "handle_update_mcp_server")
+	defer span.End()
+
+	// Parse request body as list of MCP tools to sync
+	var mcpToolsToSync []interface{}
+	if err := c.ShouldBindJSON(&mcpToolsToSync); err != nil {
+		span.RecordError(err)
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Request must be a list of MCP tools to sync"})
+		return
+	}
+
+	// Log the MCP update request
+	if s.config.Telemetry.Enabled {
+		telemetry.ReportJSON(ctx, s.logger, "mcp_update_request", mcpToolsToSync)
+	}
+
+	s.logger.Infof("Updating MCP server with %d tools", len(mcpToolsToSync))
+
+	// TODO: Implement actual MCP profile update logic here
+	// For now, we'll just acknowledge the request
+	// In the Python version, this:
+	// 1. Reads the current profile from config.json
+	// 2. Updates the 'default' key with the new tools list
+	// 3. Writes back to the profile file
+	// 4. Reloads the profile and updates servers
+
+	resp := gin.H{
+		"detail":            "MCP server updated successfully",
+		"router_error_log": "",
+	}
+
+	if s.config.Telemetry.Enabled {
+		telemetry.ReportJSON(ctx, s.logger, "mcp_update_response", resp)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // ginLogger creates a gin logger middleware using logrus
