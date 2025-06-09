@@ -125,6 +125,9 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		attribute.Bool("is_static", action.IsStatic),
 	)
 
+	// Log the command being executed
+	e.logger.Infof("Executing command: %s in directory: %s", action.Command, action.Cwd)
+
 	// Determine working directory
 	workDir := e.workingDir
 	if action.Cwd != "" {

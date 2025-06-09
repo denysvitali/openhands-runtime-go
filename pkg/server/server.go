@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -176,7 +177,19 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	defer span.End()
 
 	var req models.ActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	// Read the request body
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		span.RecordError(err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	// Log the raw request body
+	s.logger.Infof("Received command: %s", string(bodyBytes))
+
+	// Unmarshal the body into the request object
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		span.RecordError(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -216,6 +229,10 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	if s.config.Telemetry.Enabled {
 		telemetry.ReportJSON(ctx, s.logger, "action_response", observation)
 	}
+
+	// Log the response
+	responseBytes, _ := json.Marshal(observation)
+	s.logger.Infof("Sending reply: %s", string(responseBytes))
 
 	c.JSON(http.StatusOK, observation)
 }
