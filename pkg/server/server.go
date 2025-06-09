@@ -137,34 +137,34 @@ func (s *Server) handleAlive(c *gin.Context) {
 func (s *Server) handleServerInfo(c *gin.Context) {
 	// Get current time for uptime/idle calculations
 	currentTime := time.Now()
-	
+
 	// Get server info from executor
 	info := s.executor.GetServerInfo()
-	
+
 	// Calculate uptime and idle time (in seconds, as floats)
 	uptime := currentTime.Sub(info.StartTime).Seconds()
 	idleTime := currentTime.Sub(info.LastExecTime).Seconds()
-	
+
 	// Get system stats and convert to Python format
 	systemStats := s.executor.GetSystemStats()
 	resources := models.SystemResources{
 		CPUCount:      runtime.NumCPU(),
 		CPUPercent:    systemStats.CPUPercent,
 		MemoryTotal:   int64(systemStats.MemoryTotalMB * 1024 * 1024), // Convert MB to bytes
-		MemoryUsed:    int64(systemStats.MemoryUsedMB * 1024 * 1024),   // Convert MB to bytes
+		MemoryUsed:    int64(systemStats.MemoryUsedMB * 1024 * 1024),  // Convert MB to bytes
 		MemoryPercent: systemStats.MemoryPercent,
 		DiskTotal:     int64(systemStats.DiskTotalMB * 1024 * 1024), // Convert MB to bytes
-		DiskUsed:      int64(systemStats.DiskUsedMB * 1024 * 1024),   // Convert MB to bytes
+		DiskUsed:      int64(systemStats.DiskUsedMB * 1024 * 1024),  // Convert MB to bytes
 		DiskPercent:   (systemStats.DiskUsedMB / systemStats.DiskTotalMB) * 100,
 	}
-	
+
 	// Create response matching Python format
 	response := models.ServerInfoResponse{
 		Uptime:    uptime,
 		IdleTime:  idleTime,
 		Resources: resources,
 	}
-	
+
 	s.logger.Infof("Server info endpoint response: uptime=%.2fs, idle_time=%.2fs", uptime, idleTime)
 	c.JSON(http.StatusOK, response)
 }
@@ -353,7 +353,7 @@ func (s *Server) handleUpdateMCPServer(c *gin.Context) {
 	// 4. Reloads the profile and updates servers
 
 	resp := gin.H{
-		"detail":            "MCP server updated successfully",
+		"detail":           "MCP server updated successfully",
 		"router_error_log": "",
 	}
 

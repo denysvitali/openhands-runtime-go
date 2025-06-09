@@ -19,7 +19,7 @@ import (
 func setupTestServer(t *testing.T) *server.Server {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Port:           8080, // Use a different port for testing

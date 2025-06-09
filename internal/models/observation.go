@@ -70,21 +70,21 @@ type BrowserObservation struct {
 
 // SystemResources represents system resource information from Python get_system_stats()
 type SystemResources struct {
-	CPUCount     int     `json:"cpu_count"`
-	CPUPercent   float64 `json:"cpu_percent"`
-	MemoryTotal  int64   `json:"memory_total"`
-	MemoryUsed   int64   `json:"memory_used"`
+	CPUCount      int     `json:"cpu_count"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryTotal   int64   `json:"memory_total"`
+	MemoryUsed    int64   `json:"memory_used"`
 	MemoryPercent float64 `json:"memory_percent"`
-	DiskTotal    int64   `json:"disk_total"`
-	DiskUsed     int64   `json:"disk_used"`
-	DiskPercent  float64 `json:"disk_percent"`
+	DiskTotal     int64   `json:"disk_total"`
+	DiskUsed      int64   `json:"disk_used"`
+	DiskPercent   float64 `json:"disk_percent"`
 }
 
 // ServerInfoResponse represents the server info response that matches Python implementation
 type ServerInfoResponse struct {
-	Uptime    float64          `json:"uptime"`
-	IdleTime  float64          `json:"idle_time"`
-	Resources SystemResources  `json:"resources"`
+	Uptime    float64         `json:"uptime"`
+	IdleTime  float64         `json:"idle_time"`
+	Resources SystemResources `json:"resources"`
 }
 
 // ServerInfo represents server information
