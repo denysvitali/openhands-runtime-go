@@ -18,6 +18,7 @@ RUN apk --no-cache add \
     ca-certificates \
     bash \
     wget \
+    git \
     go \
     golangci-lint \
     python3 \
