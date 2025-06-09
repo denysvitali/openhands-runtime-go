@@ -55,10 +55,11 @@ type FileEditAction struct {
 
 // IPythonRunCellAction represents an IPython cell execution action
 type IPythonRunCellAction struct {
-	Action string `json:"action"`
-	Args   struct {
-		Code string `json:"code"`
-	} `json:"args"`
+	Action         string `json:"action"`
+	Code           string `json:"code"`
+	Thought        string `json:"thought,omitempty"`
+	IncludeExtra   bool   `json:"include_extra,omitempty"`
+	KernelInitCode string `json:"kernel_init_code,omitempty"`
 }
 
 // BrowseURLAction represents a browser URL navigation action

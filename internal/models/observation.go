@@ -48,6 +48,7 @@ type IPythonRunCellObservation struct {
 	Observation string    `json:"observation"`
 	Code        string    `json:"code"`
 	Content     string    `json:"content"`
+	ImageURLs   []string  `json:"image_urls,omitempty"`
 	Timestamp   time.Time `json:"timestamp"`
 }
 

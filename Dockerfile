@@ -22,8 +22,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o openhands-runtime
 # Final stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates bash wget python3 go golangci-lint
+# Install ca-certificates for HTTPS requests and Python with IPython
+RUN apk --no-cache add ca-certificates bash wget python3 py3-pip go golangci-lint && \
+    python3 -m venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    pip install --no-cache-dir ipython jupyter matplotlib numpy pandas seaborn plotly
+
+# Add virtual environment to PATH
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Create a non-root user
 RUN addgroup -g 1001 -S appgroup && \

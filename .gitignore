@@ -48,3 +48,6 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+
+# Cloned openhands repo
+/OpenHands
