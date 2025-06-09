@@ -383,6 +383,12 @@ func (s *Server) handleUpdateMCPServer(c *gin.Context) {
 // ginLogger creates a gin logger middleware using logrus
 func ginLogger(logger *logrus.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Don't log /alive requests
+		if c.Request.URL.Path == "/alive" {
+			c.Next()
+			return
+		}
+
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
