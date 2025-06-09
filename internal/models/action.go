@@ -2,6 +2,8 @@ package models
 
 import (
 	"encoding/json"
+	"errors" // Added for errors.New
+	"fmt"    // Added for fmt.Errorf
 	"time"
 )
 
@@ -79,51 +81,54 @@ type BrowseInteractiveAction struct {
 	WaitBeforeAction int    `json:"wait_before_action,omitempty"`
 }
 
+// genericUnmarshalAction is a helper function to unmarshal JSON data into a specific action type.
+// It is unexported as it's intended for use only within this package.
+func genericUnmarshalAction[T any](jsonData []byte) (T, error) {
+	var action T
+	if err := json.Unmarshal(jsonData, &action); err != nil {
+		// Return zero value of T and the error
+		var zero T
+		return zero, fmt.Errorf("failed to unmarshal json to %T: %w", zero, err)
+	}
+	return action, nil
+}
+
 // ParseAction parses a generic action map into a specific action type
 func ParseAction(actionMap map[string]interface{}) (interface{}, error) {
-	actionType, ok := actionMap["action"].(string)
+	actionTypeVal, ok := actionMap["action"]
 	if !ok {
-		return nil, json.Unmarshal([]byte("{}"), &Action{})
+		return nil, errors.New("action map is missing 'action' field")
 	}
 
-	// Convert map to JSON and then to specific struct
+	actionType, ok := actionTypeVal.(string)
+	if !ok {
+		return nil, fmt.Errorf("'action' field is not a string, got %T", actionTypeVal)
+	}
+
+	// Convert map to JSON to leverage struct tags for unmarshalling
 	jsonData, err := json.Marshal(actionMap)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal actionMap to JSON: %w", err)
 	}
 
 	switch actionType {
 	case "run":
-		var action CmdRunAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[CmdRunAction](jsonData)
 	case "read":
-		var action FileReadAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[FileReadAction](jsonData)
 	case "write":
-		var action FileWriteAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
-	case "str_replace_editor":
-		var action FileEditAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[FileWriteAction](jsonData)
+	case "edit": // Changed from "str_replace_editor"
+		return genericUnmarshalAction[FileEditAction](jsonData)
 	case "run_ipython":
-		var action IPythonRunCellAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[IPythonRunCellAction](jsonData)
 	case "browse":
-		var action BrowseURLAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[BrowseURLAction](jsonData)
 	case "browse_interactive":
-		var action BrowseInteractiveAction
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		return genericUnmarshalAction[BrowseInteractiveAction](jsonData)
 	default:
-		var action Action
-		err = json.Unmarshal(jsonData, &action)
-		return action, err
+		// For unknown action types, parse as a base Action struct.
+		// The calling Executor will then handle it as an unsupported action.
+		return genericUnmarshalAction[Action](jsonData)
 	}
 }
