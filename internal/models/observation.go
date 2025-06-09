@@ -52,9 +52,11 @@ type IPythonRunCellObservation struct {
 
 // ErrorObservation represents an error
 type ErrorObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	Timestamp   time.Time `json:"timestamp"`
+	Observation string                 `json:"observation"`
+	Content     string                 `json:"content"`
+	ErrorType   string                 `json:"error_type,omitempty"`
+	Extras      map[string]interface{} `json:"extras,omitempty"`
+	Timestamp   time.Time              `json:"timestamp"`
 }
 
 // BrowserObservation represents browser interaction output

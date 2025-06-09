@@ -8,12 +8,13 @@ import (
 	"syscall"
 	"time"
 
+	"strings"
+
 	"github.com/denysvitali/openhands-runtime-go/pkg/config"
 	"github.com/denysvitali/openhands-runtime-go/pkg/server"
 	"github.com/denysvitali/openhands-runtime-go/pkg/telemetry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"strings"
 )
 
 // serverCmd represents the server command
@@ -68,14 +69,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize telemetry if enabled
-	var cleanup func()
+	var cleanupTelemetry func()
 	if cfg.Telemetry.Enabled {
 		logger.Info("Initializing OpenTelemetry with autoexport")
-		cleanup, err = telemetry.Initialize(cfg.Telemetry, logger)
+		cleanupTelemetry, err = telemetry.Initialize(cfg.Telemetry, logger)
 		if err != nil {
 			logger.Warnf("Failed to initialize telemetry: %v", err)
 		} else {
-			defer cleanup()
+			// Defer cleanup of telemetry resources
+			defer func() {
+				logger.Info("Cleaning up telemetry...")
+				cleanupTelemetry()
+			}()
 		}
 	}
 
@@ -98,16 +103,29 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	select {
 	case err := <-serverErrors:
+		// If server.Start() returns an error (e.g., port already in use), log and exit.
+		// The executor might not have been fully initialized or might not need explicit closing here,
+		// as srv.Shutdown() (which calls executor.Close()) won't be called.
+		// However, if New() succeeded, the executor was created.
+		// It's safer to attempt a close if the server instance is valid.
+		if srv != nil && srv.Executor() != nil {
+			logger.Info("Server failed to start, attempting to clean up executor...")
+			if closeErr := srv.Executor().Close(); closeErr != nil {
+				logger.Errorf("Error closing executor after server start failure: %v", closeErr)
+			}
+		}
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-interrupt:
 		logger.Infof("Received signal %v, shutting down...", sig)
 
 		// Graceful shutdown with timeout
+		// The server.Shutdown() method now also handles executor.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		if err := srv.Shutdown(ctx); err != nil {
 			logger.Errorf("Server shutdown error: %v", err)
+			// Even if shutdown has an error, we return it, and deferred telemetry cleanup will run.
 			return err
 		}
 

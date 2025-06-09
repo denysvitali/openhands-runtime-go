@@ -1,10 +1,14 @@
 package executor
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"os"
 	"os/exec"
 	"os/user"
@@ -12,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/disk"
@@ -25,6 +30,10 @@ import (
 	"github.com/denysvitali/openhands-runtime-go/pkg/config"
 )
 
+const (
+	bashCommandTerminatorPrefix = "__OPENHANDS_COMMAND_DONE__"
+)
+
 // Executor handles action execution
 type Executor struct {
 	config       *config.Config
@@ -36,6 +45,19 @@ type Executor struct {
 	lastExecTime time.Time
 	mu           sync.RWMutex
 	tracer       trace.Tracer
+
+	bashCmd        *exec.Cmd
+	bashStdin      io.WriteCloser
+	bashStdout     *bufio.Reader
+	bashStderr     *bufio.Reader
+	bashMutex      sync.Mutex
+	currentBashCwd string
+}
+
+// QuotePathForBash quotes a path for safe use in a bash command, especially with cd.
+// It handles paths with spaces and single quotes.
+func QuotePathForBash(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 }
 
 // New creates a new executor
@@ -51,17 +73,146 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Executor, error) {
 		tracer:       otel.Tracer("openhands-runtime"),
 	}
 
-	// Initialize working directory
 	if err := executor.initWorkingDirectory(); err != nil {
-		return nil, fmt.Errorf("failed to initialize working directory: %w", err)
+		return nil, fmt.Errorf("failed to initialize executor working directory: %w", err)
 	}
 
-	// Initialize user if needed
 	if err := executor.initUser(); err != nil {
 		logger.Warnf("Failed to initialize user: %v", err)
 	}
 
+	if err := executor.initBashSession(); err != nil {
+		return nil, fmt.Errorf("failed to initialize bash session: %w", err)
+	}
+
 	return executor, nil
+}
+
+func (e *Executor) initBashSession() error {
+	e.bashMutex.Lock()
+	defer e.bashMutex.Unlock()
+
+	cmd := exec.Command("bash", "-i")
+	cmd.Dir = e.workingDir
+	e.currentBashCwd = e.workingDir
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdin pipe for bash: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdout pipe for bash: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stderr pipe for bash: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start bash process: %w", err)
+	}
+
+	e.bashCmd = cmd
+	e.bashStdin = stdin
+	e.bashStdout = bufio.NewReader(stdout)
+	e.bashStderr = bufio.NewReader(stderr)
+
+	e.logger.Info("Persistent bash session initialized.")
+
+	initCommands := []string{
+		"git config --global user.name \"openhands\"",
+		"git config --global user.email \"openhands@all-hands.dev\"",
+		"alias git='git --no-pager'",
+		"PS1='OPENHANDS_PROMPT>'",
+	}
+
+	for _, initCmd := range initCommands {
+		if _, err := e.bashStdin.Write([]byte(initCmd + "\n")); err != nil {
+			e.logger.Errorf("Failed to write init command '%s' to bash: %v. Session may be unstable.", initCmd, err)
+		}
+	}
+
+	finalInitCmd := fmt.Sprintf("echo 'Bash init complete.'; echo %s $? $(pwd)\n", bashCommandTerminatorPrefix)
+	if _, err := e.bashStdin.Write([]byte(finalInitCmd)); err != nil {
+		e.logger.Errorf("Failed to write final init command to bash: %v. Session may be unstable.", err)
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(e.bashStdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			e.logger.Debugf("Bash init stdout: %s", line)
+			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				fields := strings.Fields(strings.TrimPrefix(line, bashCommandTerminatorPrefix))
+				if len(fields) >= 2 {
+					e.currentBashCwd = strings.Join(fields[1:], " ")
+					e.logger.Infof("Bash initial CWD set to: %s", e.currentBashCwd)
+				}
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil && err != io.EOF {
+			e.logger.Warnf("Error reading bash init stdout: %v", err)
+		}
+	}()
+	go func() {
+		scanner := bufio.NewScanner(e.bashStderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			e.logger.Debugf("Bash init stderr: %s", line)
+			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				e.logger.Warnf("Bash init stderr contained terminator line: %s", line)
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil && err != io.EOF {
+			e.logger.Warnf("Error reading bash init stderr: %v", err)
+		}
+	}()
+
+	return nil
+}
+
+// Close cleans up resources, including the persistent bash session.
+func (e *Executor) Close() error {
+	e.bashMutex.Lock()
+	defer e.bashMutex.Unlock()
+
+	if e.bashCmd != nil {
+		e.logger.Info("Closing persistent bash session...")
+		if e.bashStdin != nil {
+			_, err := e.bashStdin.Write([]byte("exit\n"))
+			if err != nil {
+				e.logger.Warnf("Failed to send exit command to bash: %v", err)
+			}
+			e.bashStdin.Close()
+		}
+
+		if e.bashCmd.Process != nil {
+			done := make(chan error, 1)
+			go func() {
+				done <- e.bashCmd.Wait()
+			}()
+			select {
+			case <-time.After(5 * time.Second):
+				e.logger.Warn("Timeout waiting for bash process to exit. Attempting to kill...")
+				if killErr := e.bashCmd.Process.Kill(); killErr != nil {
+					e.logger.Errorf("Failed to kill bash process: %v", killErr)
+				} else {
+					e.logger.Info("Bash process killed.")
+				}
+			case err := <-done:
+				if err != nil {
+					e.logger.Infof("Bash process exited with status: %v", err)
+				} else {
+					e.logger.Info("Bash process exited gracefully.")
+				}
+			}
+		}
+		e.bashCmd = nil
+	}
+	return nil
 }
 
 // ExecuteAction executes an action and returns an observation
@@ -73,23 +224,21 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 	e.lastExecTime = time.Now()
 	e.mu.Unlock()
 
-	// Parse action
 	action, err := models.ParseAction(actionMap)
 	if err != nil {
 		span.RecordError(err)
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to parse action: %v", err),
+			ErrorType:   "ActionParsingError",
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Add action type to span
 	if actionType, ok := actionMap["action"].(string); ok {
 		span.SetAttributes(attribute.String("action.type", actionType))
 	}
 
-	// Execute based on action type
 	switch a := action.(type) {
 	case models.CmdRunAction:
 		return e.executeCmdRun(ctx, a)
@@ -111,69 +260,277 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     err.Error(),
+			ErrorType:   "UnsupportedActionError",
 			Timestamp:   time.Now(),
 		}, nil
 	}
 }
 
-// executeCmdRun executes a command
+// executeCmdRun executes a command in the persistent bash session.
 func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "cmd_run")
+	ctx, span := e.tracer.Start(ctx, "cmd_run_persistent_bash")
 	defer span.End()
+
+	e.bashMutex.Lock()
+	defer e.bashMutex.Unlock()
+
+	targetWd := e.currentBashCwd
+	if action.Cwd != "" {
+		if filepath.IsAbs(action.Cwd) {
+			targetWd = action.Cwd
+		} else {
+			targetWd = filepath.Join(e.currentBashCwd, action.Cwd)
+		}
+		targetWd = filepath.Clean(targetWd)
+	}
+	targetWdQuoted := QuotePathForBash(targetWd)
 
 	span.SetAttributes(
 		attribute.String("command", action.Command),
-		attribute.String("cwd", action.Cwd),
-		attribute.Bool("is_static", action.IsStatic),
+		attribute.String("resolved_cwd", targetWd),
 	)
 
-	// Log the command being executed
-	e.logger.Infof("Executing command: %s in directory: %s", action.Command, action.Cwd)
+	e.logger.Infof("Executing in bash (targetWD: %s): %s", targetWd, action.Command)
 
-	// Determine working directory
-	workDir := e.workingDir
-	if action.Cwd != "" {
-		if filepath.IsAbs(action.Cwd) {
-			workDir = action.Cwd
-		} else {
-			workDir = filepath.Join(e.workingDir, action.Cwd)
-		}
+	var actualCommandToRunInBash string
+	if action.Command == "" {
+		actualCommandToRunInBash = "true"
+	} else {
+		actualCommandToRunInBash = action.Command
 	}
 
-	// Create command
-	cmd := exec.CommandContext(ctx, "bash", "-c", action.Command)
-	cmd.Dir = workDir
+	wrappedCommand := fmt.Sprintf(
+		"cd %s; CD_EXIT_CODE=$?; if [ $CD_EXIT_CODE -eq 0 ]; then (%s); CMD_EXIT_CODE=$?; else CMD_EXIT_CODE=$CD_EXIT_CODE; fi; NEW_PWD=$(pwd); echo %s $CMD_EXIT_CODE $NEW_PWD\n",
+		targetWdQuoted,
+		actualCommandToRunInBash,
+		bashCommandTerminatorPrefix,
+	)
 
-	// Set up timeout if specified
+	cmdCtx := ctx
+	var cancelCmd context.CancelFunc
 	if action.HardTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(action.HardTimeout)*time.Second)
-		defer cancel()
-		cmd = exec.CommandContext(ctx, "bash", "-c", action.Command)
-		cmd.Dir = workDir
+		cmdCtx, cancelCmd = context.WithTimeout(ctx, time.Duration(action.HardTimeout)*time.Second)
+		defer cancelCmd()
 	}
 
-	// Execute command
-	output, err := cmd.CombinedOutput()
-	exitCode := 0
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			exitCode = exitError.ExitCode()
+	outputChan := make(chan string, 128)
+	errChan := make(chan error, 2)
+	doneChan := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	var cmdExitCode int = -1
+	var newPwdFromTerminator string
+
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Errorf("Panic recovered in stdout reader: %v", r)
+				errChan <- fmt.Errorf("panic in stdout reader: %v", r)
+			}
+		}()
+		stdoutScanner := bufio.NewScanner(e.bashStdout)
+		for stdoutScanner.Scan() {
+			line := stdoutScanner.Text()
+			if strings.HasPrefix(line, bashCommandTerminatorPrefix) {
+				trimmedLine := strings.TrimSpace(strings.TrimPrefix(line, bashCommandTerminatorPrefix))
+				parts := strings.Fields(trimmedLine)
+				if len(parts) >= 1 {
+					if _, err := fmt.Sscanf(parts[0], "%d", &cmdExitCode); err != nil {
+						e.logger.Errorf("Failed to parse exit code from terminator '%s': %v", parts[0], err)
+					}
+					if len(parts) >= 2 {
+						newPwdFromTerminator = strings.Join(parts[1:], " ")
+					} else {
+						e.logger.Warnf("Terminator line for command '%s' did not include PWD. Line: '%s'", action.Command, line)
+					}
+				} else {
+					e.logger.Errorf("Could not parse exit code from terminator line: '%s'", line)
+				}
+				close(doneChan)
+				return
+			}
+			select {
+			case outputChan <- line + "\n":
+			case <-cmdCtx.Done():
+				return
+			}
+		}
+		if err := stdoutScanner.Err(); err != nil && err != io.EOF {
+			errChan <- fmt.Errorf("stdout scan error: %w", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				e.logger.Errorf("Panic recovered in stderr reader: %v", r)
+				errChan <- fmt.Errorf("panic in stderr reader: %v", r)
+			}
+		}()
+		stderrScanner := bufio.NewScanner(e.bashStderr)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			select {
+			case outputChan <- line + "\n":
+			case <-cmdCtx.Done():
+				return
+			case <-doneChan:
+				return
+			}
+		}
+		if err := stderrScanner.Err(); err != nil && err != io.EOF {
+			errChan <- fmt.Errorf("stderr scan error: %w", err)
+		}
+	}()
+
+	if _, err := e.bashStdin.Write([]byte(wrappedCommand)); err != nil {
+		span.RecordError(err)
+		if cancelCmd != nil {
+			cancelCmd()
+		}
+		wg.Wait()
+		close(outputChan)
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to write command to bash stdin: %v", err),
+			ErrorType:   "BashIOError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	var outputBuffer strings.Builder
+
+mainLoop:
+	for {
+		select {
+		case line, ok := <-outputChan:
+			if ok {
+				outputBuffer.WriteString(line)
+			} else {
+				break mainLoop
+			}
+		case err := <-errChan:
+			e.logger.Errorf("Error from bash I/O goroutine: %v", err)
+			outputBuffer.WriteString(fmt.Sprintf("\n[EXECUTOR_IO_ERROR: %v]\n", err))
+		case <-doneChan:
+			if newPwdFromTerminator != "" {
+				e.currentBashCwd = newPwdFromTerminator
+				span.SetAttributes(attribute.String("bash.new_cwd", e.currentBashCwd))
+				e.logger.Infof("Bash CWD updated to: %s", e.currentBashCwd)
+			} else if cmdExitCode == 0 {
+				e.logger.Warnf("PWD not read from terminator for successful command '%s'. CWD may be stale.", action.Command)
+			}
+		case <-cmdCtx.Done():
+			err := cmdCtx.Err()
+			e.logger.Warnf("Command '%s' context done (timeout/cancelled): %v", action.Command, err)
+			outputBuffer.WriteString(fmt.Sprintf("\n[Command timed out after %s or was cancelled.]\n", time.Duration(action.HardTimeout)*time.Second))
+			span.SetAttributes(attribute.Bool("command.timed_out", true))
+
+			if e.bashCmd != nil && e.bashCmd.Process != nil {
+				e.logger.Info("Attempting to send SIGINT to bash process group...")
+				if err := syscall.Kill(-e.bashCmd.Process.Pid, syscall.SIGINT); err != nil {
+					e.logger.Errorf("Failed to send SIGINT to bash process group: %v. Trying individual process...", err)
+					if sigErr := e.bashCmd.Process.Signal(os.Interrupt); sigErr != nil {
+						e.logger.Errorf("Failed to send SIGINT to bash process: %v", sigErr)
+						outputBuffer.WriteString(fmt.Sprintf("\n[Failed to send SIGINT: %v]\n", sigErr))
+					}
+				} else {
+					e.logger.Info("SIGINT sent to bash process group.")
+				}
+			}
+			cmdExitCode = -1
+			break mainLoop
 		}
 	}
 
-	span.SetAttributes(attribute.Int("exit_code", exitCode))
+	if cancelCmd != nil {
+		cancelCmd()
+	}
+
+	wg.Wait()
+
+	span.SetAttributes(attribute.Int("exit_code", cmdExitCode))
 
 	return models.CmdOutputObservation{
 		Observation: "run",
-		Content:     string(output),
+		Content:     outputBuffer.String(),
 		Timestamp:   time.Now(),
 		Extras: map[string]interface{}{
 			"command":   action.Command,
-			"exit_code": exitCode,
+			"exit_code": cmdExitCode,
 		},
 	}, nil
+}
+
+// readFileInitialChunk reads the first chunk (up to 1024 bytes) of a file.
+// It is used to perform initial checks, such as binary detection, without reading the entire file.
+func (e *Executor) readFileInitialChunk(path string) ([]byte, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open file %s: %w", path, err)
+	}
+	defer file.Close()
+
+	buffer := make([]byte, 1024)
+	n, readErr := file.Read(buffer)
+	if readErr != nil && readErr != io.EOF {
+		return nil, 0, fmt.Errorf("error reading file %s: %w", path, readErr)
+	}
+	return buffer, n, nil
+}
+
+// isChunkPotentiallyBinary checks if a given byte slice (chunk) is potentially binary.
+// It does this by looking for non-printable ASCII characters, excluding tab, newline, and carriage return.
+func isChunkPotentiallyBinary(chunk []byte, n int) bool {
+	for i := 0; i < n; i++ {
+		char := chunk[i]
+		if char < 32 && char != '\t' && char != '\n' && char != '\r' {
+			return true
+		}
+	}
+	return false
+}
+
+// handleMediaType checks if the file at the given path is a known media type
+// (e.g., PNG, JPG, PDF, MP4). If so, it reads the file, encodes its content
+// as a base64 data URI, and returns a FileReadObservation.
+// It returns true if the media type was handled, otherwise false.
+func (e *Executor) handleMediaType(ctx context.Context, path string, action models.FileReadAction) (models.FileReadObservation, bool, error) {
+	lowerPath := strings.ToLower(path)
+	if strings.HasSuffix(lowerPath, ".png") || strings.HasSuffix(lowerPath, ".jpg") ||
+		strings.HasSuffix(lowerPath, ".jpeg") || strings.HasSuffix(lowerPath, ".bmp") ||
+		strings.HasSuffix(lowerPath, ".gif") || strings.HasSuffix(lowerPath, ".pdf") ||
+		strings.HasSuffix(lowerPath, ".mp4") || strings.HasSuffix(lowerPath, ".webm") ||
+		strings.HasSuffix(lowerPath, ".ogg") {
+
+		fileData, err := os.ReadFile(path)
+		if err != nil {
+			return models.FileReadObservation{}, true, fmt.Errorf("failed to read media file %s: %w", path, err)
+		}
+
+		mimeType := mime.TypeByExtension(filepath.Ext(path))
+		if mimeType == "" {
+			if strings.HasSuffix(lowerPath, ".pdf") {
+				mimeType = "application/pdf"
+			} else if strings.HasSuffix(lowerPath, ".mp4") {
+				mimeType = "video/mp4"
+			} else {
+				mimeType = "image/png"
+			}
+		}
+		mediaContent := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(fileData))
+		return models.FileReadObservation{
+			Observation: "read",
+			Content:     mediaContent,
+			Path:        action.Path,
+			Timestamp:   time.Now(),
+		}, true, nil
+	}
+	return models.FileReadObservation{}, false, nil
 }
 
 // executeFileRead reads a file
@@ -183,21 +540,75 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 
 	span.SetAttributes(attribute.String("path", action.Path))
 
-	// Resolve path
 	path := e.resolvePath(action.Path)
 
-	// Read file
-	content, err := os.ReadFile(path)
-	if err != nil {
-		span.RecordError(err)
+	cwd, _ := os.Getwd()
+
+	mediaObservation, isHandled, mediaErr := e.handleMediaType(ctx, path, action)
+	if mediaErr != nil {
+		span.RecordError(mediaErr)
 		return models.ErrorObservation{
 			Observation: "error",
-			Content:     fmt.Sprintf("Failed to read file %s: %v", path, err),
+			Content:     fmt.Sprintf("File not found: %s. Your current working directory is %s.", path, cwd),
+			ErrorType:   "FileReadError",
+			Extras:      map[string]interface{}{"path": path},
+			Timestamp:   time.Now(),
+		}, nil
+	}
+	if isHandled {
+		return mediaObservation, nil
+	}
+
+	buffer, n, chunkReadErr := e.readFileInitialChunk(path)
+	if chunkReadErr != nil {
+		content := fmt.Sprintf("Error reading file %s: %v", path, chunkReadErr)
+		if os.IsNotExist(errors.Unwrap(chunkReadErr)) {
+			content = fmt.Sprintf("File not found: %s. Your current working directory is %s.", path, cwd)
+		} else if stat, statErr := os.Stat(path); statErr == nil && stat.IsDir() {
+			content = fmt.Sprintf("Path is a directory: %s. You can only read files", path)
+		}
+		span.RecordError(chunkReadErr)
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     content,
+			ErrorType:   "FileReadError",
+			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Handle line range if specified
+	if isChunkPotentiallyBinary(buffer, n) {
+		span.SetAttributes(attribute.Bool("is_binary_heuristic", true))
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     "ERROR_BINARY_FILE",
+			ErrorType:   "BinaryFileError",
+			Extras:      map[string]interface{}{"path": path},
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		span.RecordError(err)
+		errorContent := fmt.Sprintf("File not found: %s.", path)
+		if cwd != "" {
+			errorContent = fmt.Sprintf("File not found: %s. Your current working directory is %s.", path, cwd)
+		}
+		if os.IsNotExist(err) {
+		} else if _, ok := err.(*os.PathError); ok && strings.Contains(err.Error(), "is a directory") {
+			errorContent = fmt.Sprintf("Path is a directory: %s. You can only read files", path)
+		}
+
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     errorContent,
+			ErrorType:   "FileReadError",
+			Extras:      map[string]interface{}{"path": path},
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
 	contentStr := string(content)
 	if action.Start > 0 || action.End > 0 {
 		lines := strings.Split(contentStr, "\n")
@@ -229,25 +640,26 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 
 	span.SetAttributes(attribute.String("path", action.Path))
 
-	// Resolve path
 	path := e.resolvePath(action.Path)
 
-	// Create directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		span.RecordError(err)
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to create directory for %s: %v", path, err),
+			ErrorType:   "DirectoryCreationError",
+			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Write file
-	if err := os.WriteFile(path, []byte(action.Contents), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(action.Contents), 0664); err != nil {
 		span.RecordError(err)
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write file %s: %v", path, err),
+			ErrorType:   "FileWriteError",
+			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -270,8 +682,6 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 		attribute.String("command", action.Command),
 	)
 
-	// This is a simplified implementation
-	// In a full implementation, you'd want to integrate with a proper editor
 	path := e.resolvePath(action.Path)
 
 	switch action.Command {
@@ -294,6 +704,7 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Unsupported file edit command: %s", action.Command),
+			ErrorType:   "UnsupportedFileEditCommandError",
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -301,25 +712,26 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 
 // executeStringReplace performs string replacement in a file
 func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newStr string) (interface{}, error) {
-	// Read file
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to read file %s: %v", path, err),
+			ErrorType:   "FileReadError",
+			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Replace string
 	contentStr := string(content)
 	newContent := strings.ReplaceAll(contentStr, oldStr, newStr)
 
-	// Write back
 	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write file %s: %v", path, err),
+			ErrorType:   "FileWriteError",
+			Extras:      map[string]interface{}{"path": path},
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -339,12 +751,12 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 
 	e.logger.Infof("Executing IPython with code: %s", action.Code)
 
-	// Create a temporary Python script to execute the code
 	tmpFile, err := os.CreateTemp("", "ipython_*.py")
 	if err != nil {
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to create temporary file: %v", err),
+			ErrorType:   "TempFileCreationError",
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -352,7 +764,6 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 		_ = os.Remove(name)
 	}(tmpFile.Name())
 
-	// Write IPython execution wrapper to the temporary file
 	wrapperCode := fmt.Sprintf(`
 import sys
 import io
@@ -363,20 +774,16 @@ import matplotlib
 import matplotlib.pyplot as plt
 from contextlib import redirect_stdout, redirect_stderr
 
-# Configure matplotlib to use non-interactive backend
 matplotlib.use('Agg')
 
-# Capture stdout and stderr
 stdout_capture = io.StringIO()
 stderr_capture = io.StringIO()
 result = {"stdout": "", "stderr": "", "images": [], "error": False}
 
 try:
-    # Execute the user code
     with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
         exec('''%s''')
     
-    # Capture any matplotlib figures
     if plt.get_fignums():
         import tempfile
         images = []
@@ -400,7 +807,6 @@ except Exception as e:
     result["stderr"] = stderr_capture.getvalue() + "\n" + traceback.format_exc()
     result["stdout"] = stdout_capture.getvalue()
 
-# Output the result as JSON
 print("###IPYTHON_RESULT###")
 print(json.dumps(result))
 print("###IPYTHON_END###")
@@ -411,12 +817,12 @@ print("###IPYTHON_END###")
 		return models.ErrorObservation{
 			Observation: "error",
 			Content:     fmt.Sprintf("Failed to write to temporary file: %v", err),
+			ErrorType:   "TempFileWriteError",
 			Timestamp:   time.Now(),
 		}, nil
 	}
 	_ = tmpFile.Close()
 
-	// Execute the Python script
 	cmd := exec.CommandContext(ctx, "python3", tmpFile.Name())
 	if e.workingDir != "" {
 		cmd.Dir = e.workingDir
@@ -427,7 +833,6 @@ print("###IPYTHON_END###")
 
 	e.logger.Infof("Python execution output: %s", outputStr)
 
-	// Parse the JSON result from the output
 	resultStartIdx := strings.Index(outputStr, "###IPYTHON_RESULT###")
 	resultEndIdx := strings.Index(outputStr, "###IPYTHON_END###")
 
@@ -465,7 +870,6 @@ print("###IPYTHON_END###")
 		}
 	}
 
-	// Include working directory and Python interpreter info if requested
 	if action.IncludeExtra {
 		if wd, wdErr := os.Getwd(); wdErr == nil {
 			content += fmt.Sprintf("\n[Current working directory: %s]", wd)
@@ -484,7 +888,6 @@ print("###IPYTHON_END###")
 		},
 	}
 
-	// Add image URLs to extras if present
 	if len(imageURLs) > 0 {
 		observation.Extras["image_urls"] = imageURLs
 	}
@@ -498,7 +901,6 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 	_, span := e.tracer.Start(ctx, "browse_url")
 	defer span.End()
 
-	// This is a placeholder - in a real implementation you'd integrate with a browser
 	return models.BrowserObservation{
 		Observation: "browse",
 		Content:     "Browser navigation not implemented in Go runtime",
@@ -512,7 +914,6 @@ func (e *Executor) executeBrowseInteractive(ctx context.Context, action models.B
 	_, span := e.tracer.Start(ctx, "browse_interactive")
 	defer span.End()
 
-	// This is a placeholder - in a real implementation you'd integrate with a browser
 	return models.BrowserObservation{
 		Observation: "browse",
 		Content:     "Browser interaction not implemented in Go runtime",
@@ -540,7 +941,6 @@ func (e *Executor) GetServerInfo() models.ServerInfo {
 
 // GetSystemStats returns system statistics using gopsutil
 func (e *Executor) GetSystemStats() models.SystemStats {
-	// Get current process
 	pid := int32(os.Getpid())
 	proc, err := process.NewProcess(pid)
 	if err != nil {
@@ -565,28 +965,24 @@ func (e *Executor) GetSystemStats() models.SystemStats {
 		}
 	}
 
-	// Get CPU percentage for this process
 	cpuPercent, err := proc.CPUPercent()
 	if err != nil {
 		e.logger.Warnf("Failed to get CPU percent: %v", err)
 		cpuPercent = 0.0
 	}
 
-	// Get memory info for this process
 	memInfo, err := proc.MemoryInfo()
 	if err != nil {
 		e.logger.Warnf("Failed to get memory info: %v", err)
 		memInfo = &process.MemoryInfoStat{RSS: 0, VMS: 0}
 	}
 
-	// Get memory percentage for this process
 	memPercent, err := proc.MemoryPercent()
 	if err != nil {
 		e.logger.Warnf("Failed to get memory percent: %v", err)
 		memPercent = 0.0
 	}
 
-	// Get disk usage for the working directory
 	workingDir := e.workingDir
 	if workingDir == "" {
 		workingDir = "/"
@@ -597,7 +993,6 @@ func (e *Executor) GetSystemStats() models.SystemStats {
 		diskUsage = &disk.UsageStat{Total: 0, Used: 0, Free: 0, UsedPercent: 0.0}
 	}
 
-	// Get I/O stats for this process
 	ioCounters, err := proc.IOCounters()
 	if err != nil {
 		e.logger.Warnf("Failed to get IO counters: %v", err)
@@ -634,12 +1029,10 @@ func (e *Executor) resolvePath(path string) string {
 
 // initWorkingDirectory initializes the working directory
 func (e *Executor) initWorkingDirectory() error {
-	// Ensure working directory exists
 	if err := os.MkdirAll(e.workingDir, 0755); err != nil {
 		return err
 	}
 
-	// Change to working directory
 	if err := os.Chdir(e.workingDir); err != nil {
 		return err
 	}
@@ -649,8 +1042,6 @@ func (e *Executor) initWorkingDirectory() error {
 
 // initUser initializes the user (simplified implementation)
 func (e *Executor) initUser() error {
-	// This is a simplified implementation
-	// In a real implementation, you might need to handle user switching
 	currentUser, err := user.Current()
 	if err != nil {
 		return err
@@ -664,7 +1055,6 @@ func (e *Executor) initUser() error {
 func (e *Executor) toRelativePath(path string) string {
 	relPath, err := filepath.Rel(e.workingDir, path)
 	if err != nil {
-		// If there's an error (e.g., different volumes on Windows), return the original path
 		return path
 	}
 	return relPath
@@ -730,14 +1120,12 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 
 	span.SetAttributes(attribute.String("path", path))
 
-	// Use working directory as default if path is empty
 	if path == "" {
 		path = e.workingDir
 	}
 
 	resolvedPath := e.resolvePath(path)
 
-	// Check if directory exists
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return []string{}, nil
 	}
@@ -754,14 +1142,12 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 	for _, entry := range dirEntries {
 		name := entry.Name()
 		if entry.IsDir() {
-			// Add trailing slash to directories (required by frontend)
 			directories = append(directories, name+"/")
 		} else {
 			files = append(files, name)
 		}
 	}
 
-	// Sort directories and files separately (matching Python behavior)
 	sort.Slice(directories, func(i, j int) bool {
 		return strings.ToLower(directories[i]) < strings.ToLower(directories[j])
 	})
@@ -769,7 +1155,6 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 		return strings.ToLower(files[i]) < strings.ToLower(files[j])
 	})
 
-	// Combine sorted directories and files
 	result := append(directories, files...)
 	return result, nil
 }
@@ -783,13 +1168,11 @@ func (e *Executor) UploadFile(ctx context.Context, path string, content []byte) 
 
 	resolvedPath := e.resolvePath(path)
 
-	// Create directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0755); err != nil {
 		span.RecordError(err)
 		return err
 	}
 
-	// Write file
 	if err := os.WriteFile(resolvedPath, content, 0644); err != nil {
 		span.RecordError(err)
 		return err
@@ -807,7 +1190,6 @@ func (e *Executor) DownloadFile(ctx context.Context, path string) ([]byte, error
 
 	resolvedPath := e.resolvePath(path)
 
-	// Read file
 	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		span.RecordError(err)

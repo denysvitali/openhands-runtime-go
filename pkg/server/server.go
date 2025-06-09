@@ -93,12 +93,27 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.server == nil {
 		return nil
 	}
+	// Also close the executor
+	if s.executor != nil {
+		s.logger.Info("Closing executor...")
+		if err := s.executor.Close(); err != nil {
+			s.logger.Errorf("Error closing executor: %v", err)
+			// We still want to try shutting down the HTTP server, so don't return here
+			// but log the error.
+		}
+	}
 	return s.server.Shutdown(ctx)
 }
 
 // Engine returns the gin engine for testing purposes
 func (s *Server) Engine() *gin.Engine {
 	return s.engine
+}
+
+// Executor returns the underlying executor instance.
+// This is useful for tasks like graceful shutdown of executor resources.
+func (s *Server) Executor() *executor.Executor {
+	return s.executor
 }
 
 // setupRoutes configures all HTTP routes
