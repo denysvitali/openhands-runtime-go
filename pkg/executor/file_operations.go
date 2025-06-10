@@ -268,13 +268,13 @@ func (e *Executor) executeFileCreate(ctx context.Context, path, content string) 
 		Content:     fmt.Sprintf("File created successfully at: %s", path),
 		Timestamp:   time.Now(),
 		Extras: map[string]interface{}{
-			"path":         path,
-			"prev_exist":   false,
-			"old_content":  "",
-			"new_content":  content,
-			"impl_source":  "oh_aci",
-			"diff":         nil,
-			"_diff_cache":  nil,
+			"path":        path,
+			"prev_exist":  false,
+			"old_content": "",
+			"new_content": content,
+			"impl_source": "oh_aci",
+			"diff":        nil,
+			"_diff_cache": nil,
 		},
 	}, nil
 }
@@ -342,13 +342,13 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 		Content:     "File edited successfully",
 		Timestamp:   time.Now(),
 		Extras: map[string]interface{}{
-			"path":         path,
-			"prev_exist":   true,
-			"old_content":  contentStr,
-			"new_content":  newContent,
-			"impl_source":  "oh_aci",
-			"diff":         nil,
-			"_diff_cache":  nil,
+			"path":        path,
+			"prev_exist":  true,
+			"old_content": contentStr,
+			"new_content": newContent,
+			"impl_source": "oh_aci",
+			"diff":        nil,
+			"_diff_cache": nil,
 		},
 	}, nil
 }
