@@ -36,10 +36,10 @@ type FileWriteObservation struct {
 
 // FileEditObservation represents file edit output
 type FileEditObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	Path        string    `json:"path"`
-	Timestamp   time.Time `json:"timestamp"`
+	Observation string                 `json:"observation"`
+	Content     string                 `json:"content"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Extras      map[string]interface{} `json:"extras"`
 }
 
 // IPythonRunCellObservation represents IPython execution output

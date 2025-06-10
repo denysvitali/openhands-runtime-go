@@ -221,6 +221,63 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 	}, nil
 }
 
+// executeFileCreate creates a new file and returns FileEditObservation
+func (e *Executor) executeFileCreate(ctx context.Context, path, content string) (interface{}, error) {
+	_, span := e.tracer.Start(ctx, "file_create")
+	defer span.End()
+
+	span.SetAttributes(attribute.String("path", path))
+
+	resolvedPath := e.resolvePath(path)
+
+	// Check if file already exists
+	if _, err := os.Stat(resolvedPath); err == nil {
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("File already exists: %s", path),
+			ErrorType:   "FileExistsError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Create directory if needed
+	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0755); err != nil {
+		span.RecordError(err)
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to create directory for %s: %v", path, err),
+			ErrorType:   "DirectoryCreationError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Write file
+	if err := os.WriteFile(resolvedPath, []byte(content), 0644); err != nil {
+		span.RecordError(err)
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to create file %s: %v", path, err),
+			ErrorType:   "FileCreateError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	return models.FileEditObservation{
+		Observation: "edit",
+		Content:     fmt.Sprintf("File created successfully at: %s", path),
+		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"path":         path,
+			"prev_exist":   false,
+			"old_content":  "",
+			"new_content":  content,
+			"impl_source":  "oh_aci",
+			"diff":         nil,
+			"_diff_cache":  nil,
+		},
+	}, nil
+}
+
 // executeFileEdit performs file editing operations
 func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAction) (interface{}, error) {
 	ctx, span := e.tracer.Start(ctx, "file_edit")
@@ -242,11 +299,7 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 			End:    0,
 		})
 	case "create":
-		return e.executeFileWrite(ctx, models.FileWriteAction{
-			Action:   "write",
-			Path:     action.Path,
-			Contents: action.FileText,
-		})
+		return e.executeFileCreate(ctx, action.Path, action.FileText)
 	case "str_replace":
 		return e.executeStringReplace(ctx, path, action.OldStr, action.NewStr)
 	default:
@@ -286,7 +339,15 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 	return models.FileEditObservation{
 		Observation: "edit",
 		Content:     "File edited successfully",
-		Path:        path,
 		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"path":         path,
+			"prev_exist":   true,
+			"old_content":  contentStr,
+			"new_content":  newContent,
+			"impl_source":  "oh_aci",
+			"diff":         nil,
+			"_diff_cache":  nil,
+		},
 	}, nil
 }
