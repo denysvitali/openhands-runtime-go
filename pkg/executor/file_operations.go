@@ -64,7 +64,8 @@ func (e *Executor) handleMediaType(ctx context.Context, path string, action mode
 
 		fileData, err := os.ReadFile(path)
 		if err != nil {
-			return models.FileReadObservation{}, true, fmt.Errorf("failed to read media file %s: %w", path, err)
+			// Instead of returning an empty FileReadObservation, return a zero value and let the caller handle the error
+			return models.FileReadObservation{}, false, err
 		}
 
 		mimeType := mime.TypeByExtension(filepath.Ext(path))
