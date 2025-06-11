@@ -1,21 +1,30 @@
 package executor
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/internal/models"
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// Default timeout for commands that don't specify one
+const defaultCommandTimeout = 300 // seconds
+
 // executeCmdRun executes a shell command and returns its output
 func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction) (interface{}, error) {
 	ctx, span := e.tracer.Start(ctx, "cmd_run")
 	defer span.End()
+
+	// Log command execution
+	e.logger.Infof("Executing command: %s", action.Command)
 
 	span.SetAttributes(
 		attribute.String("command", action.Command),
@@ -24,23 +33,37 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		attribute.Int("hard_timeout", action.HardTimeout),
 	)
 
-	// Create a new context with timeout if specified
-	if action.HardTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(action.HardTimeout)*time.Second)
-		defer cancel()
+	// For static commands, use a simpler execution path
+	if action.IsStatic {
+		return e.executeStaticCommand(ctx, action)
 	}
 
+	// Create a new context with timeout
+	timeout := defaultCommandTimeout
+	if action.HardTimeout > 0 {
+		timeout = action.HardTimeout
+	}
+	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
+	defer cancel()
+
 	// Create and configure the command
-	cmd, stdout, stderr, err := e.createCommand(ctx, action)
-	if err != nil {
-		return err, nil
+	cmd, outputChan, errChan := e.createCommandWithStreaming(execCtx, action)
+	if cmd == nil {
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     "Failed to create command",
+			ErrorType:   "CommandCreationError",
+			Timestamp:   time.Now(),
+		}, nil
 	}
 
 	// Execute the command and collect output
-	output, exitCode, err := e.executeCommand(cmd, stdout, stderr)
-	if err != nil {
-		return err, nil
+	output, exitCode := e.executeCommandWithStreaming(cmd, outputChan, errChan, execCtx.Done())
+
+	// Check if the command was killed due to timeout
+	if exitCode == -1 && execCtx.Err() == context.DeadlineExceeded {
+		e.logger.Warnf("Command timed out after %d seconds: %s", timeout, action.Command)
+		output += "\n[Command timed out]"
 	}
 
 	return models.CmdOutputObservation{
@@ -55,96 +78,209 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	}, nil
 }
 
-// createCommand creates and configures a new command
-func (e *Executor) createCommand(ctx context.Context, action models.CmdRunAction) (*exec.Cmd, io.ReadCloser, io.ReadCloser, error) {
+// executeStaticCommand executes a command in a static context (not using the persistent bash session)
+func (e *Executor) executeStaticCommand(ctx context.Context, action models.CmdRunAction) (interface{}, error) {
+	workDir := action.Cwd
+	if workDir == "" {
+		workDir = e.workingDir
+	}
+
+	e.logger.Infof("Executing static command in %s: %s", workDir, action.Command)
+
+	// Create command
 	cmd := exec.CommandContext(ctx, "sh", "-c", action.Command)
+	cmd.Dir = workDir
 
-	// Set working directory if specified
-	if action.Cwd != "" {
-		cmd.Dir = e.resolvePath(action.Cwd)
-	} else {
-		cmd.Dir = e.workingDir
-	}
-
-	// Create pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to start command: %w", err)
-	}
-
-	return cmd, stdout, stderr, nil
-}
-
-// executeCommand executes the command and returns its output and exit code
-func (e *Executor) executeCommand(cmd *exec.Cmd, stdout, stderr io.ReadCloser) (string, int, error) {
-	// Create buffers for output with reasonable initial size
-	var stdoutBuf, stderrBuf strings.Builder
-	stdoutBuf.Grow(1024) // 1KB initial capacity
-	stderrBuf.Grow(1024) // 1KB initial capacity
-
-	// Create channels for goroutine completion
-	stdoutDone := make(chan struct{})
-	stderrDone := make(chan struct{})
-
-	// Read stdout in a goroutine
-	go func() {
-		defer close(stdoutDone)
-		_, err := io.Copy(&stdoutBuf, stdout)
-		if err != nil && err != io.EOF {
-			e.logger.Warnf("Error reading stdout: %v", err)
-		}
-	}()
-
-	// Read stderr in a goroutine
-	go func() {
-		defer close(stderrDone)
-		_, err := io.Copy(&stderrBuf, stderr)
-		if err != nil && err != io.EOF {
-			e.logger.Warnf("Error reading stderr: %v", err)
-		}
-	}()
-
-	// Wait for command completion
-	err := cmd.Wait()
-
-	// Wait for output reading to complete
-	<-stdoutDone
-	<-stderrDone
-
-	// Combine outputs
-	outputStr := stdoutBuf.String()
-	if stderrBuf.Len() > 0 {
-		if outputStr != "" {
-			outputStr += "\n"
-		}
-		outputStr += stderrBuf.String()
-	}
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
 
 	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			// Handle other errors (like context cancellation)
 			exitCode = -1
-			if err == context.DeadlineExceeded {
-				outputStr = "Command timed out"
-			} else if err == context.Canceled {
-				outputStr = "Command was cancelled"
-			} else {
-				outputStr = fmt.Sprintf("Command failed: %v", err)
-			}
+			e.logger.Errorf("Static command error: %v", err)
 		}
 	}
 
-	return outputStr, exitCode, nil
+	return models.CmdOutputObservation{
+		Observation: "run",
+		Content:     outputStr,
+		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"command":   action.Command,
+			"exit_code": exitCode,
+			"cwd":       workDir,
+		},
+	}, nil
+}
+
+// createCommandWithStreaming creates a command with real-time output streaming
+func (e *Executor) createCommandWithStreaming(ctx context.Context, action models.CmdRunAction) (*exec.Cmd, chan string, chan error) {
+	outputChan := make(chan string, 100) // Buffer to prevent blocking
+	errChan := make(chan error, 1)
+
+	// Set working directory
+	workDir := action.Cwd
+	if workDir == "" {
+		workDir = e.workingDir
+	}
+
+	// Create the command with proper process group for clean termination
+	cmd := exec.CommandContext(ctx, "sh", "-c", action.Command)
+	cmd.Dir = workDir
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true, // Create a new process group for clean termination
+	}
+
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		e.logger.Errorf("Failed to create stdout pipe: %v", err)
+		close(outputChan)
+		errChan <- fmt.Errorf("failed to create stdout pipe: %w", err)
+		close(errChan)
+		return nil, outputChan, errChan
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		e.logger.Errorf("Failed to create stderr pipe: %v", err)
+		close(outputChan)
+		errChan <- fmt.Errorf("failed to create stderr pipe: %w", err)
+		close(errChan)
+		return nil, outputChan, errChan
+	}
+
+	// Start command
+	if err := cmd.Start(); err != nil {
+		e.logger.Errorf("Failed to start command: %v", err)
+		close(outputChan)
+		errChan <- fmt.Errorf("failed to start command: %w", err)
+		close(errChan)
+		return nil, outputChan, errChan
+	}
+
+	// Start goroutines to stream output
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Stream stdout
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			outputChan <- line + "\n"
+		}
+		if err := scanner.Err(); err != nil && err != io.EOF && !strings.Contains(err.Error(), "file already closed") {
+			e.logger.Warnf("Error reading stdout: %v", err)
+		}
+	}()
+
+	// Stream stderr
+	go func() {
+		defer wg.Done()
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			outputChan <- line + "\n"
+		}
+		if err := scanner.Err(); err != nil && err != io.EOF && !strings.Contains(err.Error(), "file already closed") {
+			e.logger.Warnf("Error reading stderr: %v", err)
+		}
+	}()
+
+	// Wait for both streams to complete, then close channels
+	go func() {
+		wg.Wait()
+		close(outputChan)
+
+		// Wait for the command to finish and send any error
+		err := cmd.Wait()
+		errChan <- err
+		close(errChan)
+	}()
+
+	return cmd, outputChan, errChan
+}
+
+// executeCommandWithStreaming executes a command with streaming output and handles termination
+func (e *Executor) executeCommandWithStreaming(cmd *exec.Cmd, outputChan chan string, errChan chan error, done <-chan struct{}) (string, int) {
+	var output strings.Builder
+	output.Grow(4096) // Preallocate 4KB
+
+	// Process output until both streams are closed
+	for {
+		select {
+		case line, ok := <-outputChan:
+			if !ok {
+				// Channel closed, all output received
+				outputChan = nil
+				if errChan == nil {
+					// Both channels are closed, we're done
+					goto processExitCode
+				}
+				continue
+			}
+			output.WriteString(line)
+		case err, ok := <-errChan:
+			if !ok {
+				// Error channel closed
+				errChan = nil
+				if outputChan == nil {
+					// Both channels are closed, we're done
+					goto processExitCode
+				}
+				continue
+			}
+			if err != nil {
+				e.logger.Debugf("Command error: %v", err)
+			}
+		case <-done:
+			// Context cancelled or timed out
+			e.killProcess(cmd)
+			return output.String(), -1
+		}
+	}
+
+processExitCode:
+	exitCode := 0
+	if cmd.ProcessState == nil {
+		e.logger.Warn("Command process state is nil")
+		return output.String(), -1
+	}
+
+	if !cmd.ProcessState.Success() {
+		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+			exitCode = status.ExitStatus()
+		} else {
+			exitCode = 1 // Generic error
+		}
+	}
+
+	return output.String(), exitCode
+}
+
+// killProcess forcibly terminates a process and its children
+func (e *Executor) killProcess(cmd *exec.Cmd) {
+	if cmd.Process == nil {
+		return
+	}
+
+	// Try to kill the entire process group
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err == nil {
+		e.logger.Infof("Killing process group %d", pgid)
+		if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil {
+			e.logger.Warnf("Failed to kill process group: %v", err)
+		}
+	}
+
+	// Also try to kill just this process as a fallback
+	if err := cmd.Process.Kill(); err != nil {
+		e.logger.Warnf("Failed to kill process: %v", err)
+	}
 }
