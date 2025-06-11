@@ -22,6 +22,7 @@ type BasicObservation struct {
 type CmdOutputExtras struct {
 	ExitCode  int    `json:"exit_code"`
 	CommandID string `json:"command_id,omitempty"`
+	Command   string `json:"command,omitempty"`
 }
 
 // FileReadExtras contains extra fields for file read observations
@@ -59,7 +60,7 @@ type IPythonExtras struct {
 }
 
 // NewCmdOutputObservation creates a new command execution output observation
-func NewCmdOutputObservation(content string, exitCode int, commandID string) Observation[CmdOutputExtras] {
+func NewCmdOutputObservation(content string, exitCode int, commandID string, command string) Observation[CmdOutputExtras] {
 	return Observation[CmdOutputExtras]{
 		Observation: "run",
 		Content:     content,
@@ -67,6 +68,7 @@ func NewCmdOutputObservation(content string, exitCode int, commandID string) Obs
 		Extras: CmdOutputExtras{
 			ExitCode:  exitCode,
 			CommandID: commandID,
+			Command:   command,
 		},
 	}
 }

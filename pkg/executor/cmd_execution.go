@@ -110,5 +110,5 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		commandID = fmt.Sprintf("%d", cmd.Process.Pid)
 	}
 
-	return models.NewCmdOutputObservation(output, exitCode, commandID), nil
+	return models.NewCmdOutputObservation(output, exitCode, commandID, action.Command), nil
 }
