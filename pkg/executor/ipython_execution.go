@@ -38,7 +38,11 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 			"IPythonError",
 		), nil
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			e.logger.Warnf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a simple notebook with the code
 	notebookPath := filepath.Join(tempDir, "notebook.ipynb")

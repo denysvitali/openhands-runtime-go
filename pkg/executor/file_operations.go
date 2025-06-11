@@ -349,7 +349,7 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 	oldContent := string(content)
 
 	// Replace string
-	newContent := strings.Replace(oldContent, oldStr, newStr, -1)
+	newContent := strings.ReplaceAll(oldContent, oldStr, newStr)
 
 	// Check if content changed
 	if oldContent == newContent {
