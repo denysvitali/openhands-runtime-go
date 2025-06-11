@@ -66,15 +66,34 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		output += "\n[Command timed out]"
 	}
 
+	// Special handling for git commands - add changes field for compatibility with OpenHands
+	extras := map[string]interface{}{
+		"command":   action.Command,
+		"exit_code": exitCode,
+		"cwd":       cmd.Dir,
+	}
+
+	// Detect git commands and add changes field to ensure frontend compatibility
+	if strings.Contains(action.Command, "git ") {
+		// Common git commands that need to report changes
+		if strings.Contains(action.Command, "git status") ||
+			strings.Contains(action.Command, "git diff") ||
+			strings.Contains(action.Command, "git add") ||
+			strings.Contains(action.Command, "git commit") ||
+			strings.Contains(action.Command, "git checkout") {
+
+			e.logger.Debug("Adding changes field for git command compatibility")
+
+			// Add a changes field with the output to ensure frontend displays it correctly
+			extras["changes"] = output
+		}
+	}
+
 	return models.CmdOutputObservation{
 		Observation: "run",
 		Content:     output,
 		Timestamp:   time.Now(),
-		Extras: map[string]interface{}{
-			"command":   action.Command,
-			"exit_code": exitCode,
-			"cwd":       cmd.Dir,
-		},
+		Extras:      extras,
 	}, nil
 }
 
@@ -105,15 +124,34 @@ func (e *Executor) executeStaticCommand(ctx context.Context, action models.CmdRu
 		}
 	}
 
+	// Special handling for git commands - add changes field for compatibility with OpenHands
+	extras := map[string]interface{}{
+		"command":   action.Command,
+		"exit_code": exitCode,
+		"cwd":       workDir,
+	}
+
+	// Detect git commands and add changes field to ensure frontend compatibility
+	if strings.Contains(action.Command, "git ") {
+		// Common git commands that need to report changes
+		if strings.Contains(action.Command, "git status") ||
+			strings.Contains(action.Command, "git diff") ||
+			strings.Contains(action.Command, "git add") ||
+			strings.Contains(action.Command, "git commit") ||
+			strings.Contains(action.Command, "git checkout") {
+
+			e.logger.Debug("Adding changes field for git command compatibility")
+
+			// Add a changes field with the output to ensure frontend displays it correctly
+			extras["changes"] = outputStr
+		}
+	}
+
 	return models.CmdOutputObservation{
 		Observation: "run",
 		Content:     outputStr,
 		Timestamp:   time.Now(),
-		Extras: map[string]interface{}{
-			"command":   action.Command,
-			"exit_code": exitCode,
-			"cwd":       workDir,
-		},
+		Extras:      extras,
 	}, nil
 }
 

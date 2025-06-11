@@ -196,6 +196,7 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		span.RecordError(err)
+		s.logger.Errorf("Failed to read request body: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
 		return
 	}
@@ -203,9 +204,102 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	// Log the raw request body
 	s.logger.Infof("Received command: %s", string(bodyBytes))
 
+	// -----------------------------------------------------------------------
+	// Tool Compatibility Layer
+	// -----------------------------------------------------------------------
+	// This section handles compatibility with different AI tool calling formats.
+	// OpenHands can work with various frontends that might use OpenAI, Claude,
+	// or other LLM APIs. Each system has different tool calling formats:
+	//
+	// 1. Claude: Uses "tool_call_metadata" with tools like "str_replace_editor"
+	// 2. OpenAI: Uses "tool_calls" array with function name and arguments
+	//
+	// We map these external formats to our internal action formats before processing.
+	// -----------------------------------------------------------------------
+	var bodyMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &bodyMap); err == nil {
+		// Check if this is a tool call with specific formats we need to map
+		if action, hasAction := bodyMap["action"].(map[string]interface{}); hasAction {
+			// Handle Claude str_replace_editor used for reading files
+			if toolMeta, hasToolMeta := action["tool_call_metadata"].(map[string]interface{}); hasToolMeta {
+				if toolName, hasToolName := toolMeta["function_name"].(string); hasToolName {
+					s.logger.Infof("Detected tool call: %s", toolName)
+
+					// Handle str_replace_editor for file viewing
+					if toolName == "str_replace_editor" {
+						args, hasArgs := action["args"].(map[string]interface{})
+						if hasArgs {
+							command, hasCommand := args["command"].(string)
+							if hasCommand && command == "view" {
+								// This is a file read request using str_replace_editor
+								// Remap it to a standard read action
+								s.logger.Infof("Remapping str_replace_editor view to read action")
+								bodyMap["action"] = "read"
+								if path, hasPath := args["path"].(string); hasPath {
+									bodyMap["path"] = path
+								}
+								// Re-encode the modified request
+								modifiedBody, _ := json.Marshal(bodyMap)
+								bodyBytes = modifiedBody
+							}
+						}
+					}
+				}
+			}
+
+			// Handle OpenAI tool calls
+			if tool_calls, hasToolCalls := action["tool_calls"].([]interface{}); hasToolCalls && len(tool_calls) > 0 {
+				s.logger.Infof("Detected OpenAI format tool calls")
+
+				// Process the first tool call
+				if toolCall, ok := tool_calls[0].(map[string]interface{}); ok {
+					if function, hasFunction := toolCall["function"].(map[string]interface{}); hasFunction {
+						name, hasName := function["name"].(string)
+						arguments, hasArguments := function["arguments"].(string)
+
+						if hasName && hasArguments {
+							s.logger.Infof("Processing OpenAI tool call: %s", name)
+
+							// Parse arguments
+							var args map[string]interface{}
+							if err := json.Unmarshal([]byte(arguments), &args); err == nil {
+								// Map to our internal actions
+								switch name {
+								case "read_file":
+									if filePath, ok := args["target_file"].(string); ok {
+										bodyMap["action"] = "read"
+										bodyMap["path"] = filePath
+										s.logger.Infof("Remapped read_file to read action for %s", filePath)
+									}
+								case "run_terminal_cmd":
+									if cmd, ok := args["command"].(string); ok {
+										bodyMap["action"] = "run"
+										bodyMap["command"] = cmd
+										s.logger.Infof("Remapped run_terminal_cmd to run action: %s", cmd)
+									}
+								}
+
+								// Re-encode the modified request
+								modifiedBody, _ := json.Marshal(bodyMap)
+								bodyBytes = modifiedBody
+							} else {
+								s.logger.Warnf("Failed to parse OpenAI tool arguments: %v", err)
+							}
+						}
+					}
+				}
+			}
+		}
+	} else {
+		s.logger.Warnf("Failed to parse request for tool compatibility check: %v", err)
+	}
+	// End of Tool Compatibility Layer
+	// -----------------------------------------------------------------------
+
 	// Unmarshal the body into the request object
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		span.RecordError(err)
+		s.logger.Errorf("Failed to unmarshal request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -213,6 +307,7 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	// Add action type to span if available
 	if actionType, ok := req.Action["action"].(string); ok {
 		span.SetAttributes(attribute.String("action.type", actionType))
+		s.logger.Infof("Processing action type: %s", actionType)
 	}
 
 	// Report action request JSON in traces and logs
