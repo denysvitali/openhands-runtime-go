@@ -36,10 +36,10 @@ RUN apk --no-cache add \
 
 RUN addgroup -g 1001 -S openhands && \
     adduser -u 1001 -S openhands -G openhands && \
-    mkdir -p /workspace /app /openhands/code && \
-    chown openhands:openhands /workspace /app /openhands/code
+    mkdir -p /app /openhands/code && \
+    chown openhands:openhands /app /openhands/code
 
-WORKDIR /workspace
+WORKDIR /openhands/code
 
 COPY --from=builder /app/openhands-runtime-go /app/
 USER openhands
