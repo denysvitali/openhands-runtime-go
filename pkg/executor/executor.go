@@ -3,7 +3,9 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,11 +140,80 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 		cmd.Dir = e.workingDir
 	}
 
-	// Execute the command and capture output
-	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
-	exitCode := 0
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to create stdout pipe: %v", err),
+			ErrorType:   "CommandExecutionError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to create stderr pipe: %v", err),
+			ErrorType:   "CommandExecutionError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
 
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return models.ErrorObservation{
+			Observation: "error",
+			Content:     fmt.Sprintf("Failed to start command: %v", err),
+			ErrorType:   "CommandExecutionError",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Create buffers for output with reasonable initial size
+	var stdoutBuf, stderrBuf strings.Builder
+	stdoutBuf.Grow(1024) // 1KB initial capacity
+	stderrBuf.Grow(1024) // 1KB initial capacity
+
+	// Create channels for goroutine completion
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+
+	// Read stdout in a goroutine
+	go func() {
+		defer close(stdoutDone)
+		_, err := io.Copy(&stdoutBuf, stdout)
+		if err != nil && err != io.EOF {
+			e.logger.Warnf("Error reading stdout: %v", err)
+		}
+	}()
+
+	// Read stderr in a goroutine
+	go func() {
+		defer close(stderrDone)
+		_, err := io.Copy(&stderrBuf, stderr)
+		if err != nil && err != io.EOF {
+			e.logger.Warnf("Error reading stderr: %v", err)
+		}
+	}()
+
+	// Wait for command completion
+	err = cmd.Wait()
+
+	// Wait for output reading to complete
+	<-stdoutDone
+	<-stderrDone
+
+	// Combine outputs
+	outputStr := stdoutBuf.String()
+	if stderrBuf.Len() > 0 {
+		if outputStr != "" {
+			outputStr += "\n"
+		}
+		outputStr += stderrBuf.String()
+	}
+
+	exitCode := 0
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
