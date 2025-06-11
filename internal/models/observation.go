@@ -50,7 +50,7 @@ type BrowserExtras struct {
 
 // ErrorExtras contains extra fields for error observations
 type ErrorExtras struct {
-	ErrorType string `json:"error_type,omitempty"`
+	ErrorID string `json:"error_id,omitempty"`
 }
 
 // IPythonExtras contains extra fields for IPython observations
@@ -111,13 +111,13 @@ func NewFileEditObservation(content string, path string, oldContent string, newC
 }
 
 // NewErrorObservation creates a new error observation
-func NewErrorObservation(content string, errorType string) Observation[ErrorExtras] {
+func NewErrorObservation(content string, errorID string) Observation[ErrorExtras] {
 	return Observation[ErrorExtras]{
 		Observation: "error",
 		Content:     content,
 		Timestamp:   time.Now(),
 		Extras: ErrorExtras{
-			ErrorType: errorType,
+			ErrorID: errorID,
 		},
 	}
 }
