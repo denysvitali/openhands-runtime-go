@@ -122,7 +122,7 @@ func TestHandleExecuteAction_CmdRun_Success(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &resp)
 	require.NoError(t, err, "Failed to unmarshal response")
 
-	assert.Equal(t, "cmd_output", resp.Observation)
+	assert.Equal(t, "run", resp.Observation)
 	assert.Contains(t, resp.Content, "hello world")
 	assert.Equal(t, 0, resp.Extras.ExitCode)
 	assert.NotEmpty(t, resp.Extras.CommandID)

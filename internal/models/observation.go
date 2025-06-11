@@ -212,7 +212,7 @@ type VSCodeConnectionToken struct {
 // NewIPythonRunCellObservation creates a new IPython cell execution output observation
 func NewIPythonRunCellObservation(content string) Observation[IPythonExtras] {
 	return Observation[IPythonExtras]{
-		Observation: "ipython_output",
+		Observation: "run_ipython",
 		Content:     content,
 		Timestamp:   time.Now(),
 		Extras:      IPythonExtras{},
