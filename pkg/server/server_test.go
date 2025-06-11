@@ -117,14 +117,15 @@ func TestHandleExecuteAction_CmdRun_Success(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Handler returned wrong status code")
 
-	var resp models.CmdOutputObservation
+	// Use the generic Observation type with CmdOutputExtras
+	var resp models.Observation[models.CmdOutputExtras]
 	err = json.Unmarshal(rr.Body.Bytes(), &resp)
 	require.NoError(t, err, "Failed to unmarshal response")
 
-	assert.Equal(t, "run", resp.Observation)
+	assert.Equal(t, "cmd_output", resp.Observation)
 	assert.Contains(t, resp.Content, "hello world")
-	assert.Equal(t, "echo 'hello world'", resp.Extras["command"])
-	assert.Equal(t, 0.0, resp.Extras["exit_code"])
+	assert.Equal(t, 0, resp.Extras.ExitCode)
+	assert.NotEmpty(t, resp.Extras.CommandID)
 }
 
 func TestHandleExecuteAction_InvalidJSON(t *testing.T) {

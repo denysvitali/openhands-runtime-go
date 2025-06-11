@@ -3,7 +3,6 @@ package executor
 import (
 	"fmt"
 	"os"
-	"os/user"
 
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/process"
@@ -107,15 +106,4 @@ func (e *Executor) GetSystemStats() models.SystemStats {
 			WriteBytes: ioCounters.WriteBytes,
 		},
 	}
-}
-
-// initUser initializes the user (simplified implementation)
-func (e *Executor) initUser() error {
-	currentUser, err := user.Current()
-	if err != nil {
-		return err
-	}
-
-	e.logger.Infof("Running as user: %s (UID: %s)", currentUser.Username, currentUser.Uid)
-	return nil
 }

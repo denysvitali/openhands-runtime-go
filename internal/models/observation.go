@@ -2,70 +2,137 @@ package models
 
 import "time"
 
-// Observation represents a base observation
-type Observation struct {
+// Observation represents a base observation with generic extras
+type Observation[T any] struct {
+	Observation string    `json:"observation"`
+	Content     string    `json:"content"`
+	Timestamp   time.Time `json:"timestamp"`
+	Extras      T         `json:"extras,omitempty"`
+}
+
+// BasicObservation is an observation with no specialized extras
+type BasicObservation struct {
 	Observation string                 `json:"observation"`
 	Content     string                 `json:"content"`
 	Timestamp   time.Time              `json:"timestamp"`
 	Extras      map[string]interface{} `json:"extras,omitempty"`
 }
 
-// CmdOutputObservation represents command execution output
-type CmdOutputObservation struct {
-	Observation string                 `json:"observation"`
-	Content     string                 `json:"content"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Extras      map[string]interface{} `json:"extras"`
+// CmdOutputExtras contains extra fields for command output observations
+type CmdOutputExtras struct {
+	ExitCode  int    `json:"exit_code"`
+	CommandID string `json:"command_id,omitempty"`
 }
 
-// FileReadObservation represents file read output
-type FileReadObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	Path        string    `json:"path"`
-	Timestamp   time.Time `json:"timestamp"`
+// FileReadExtras contains extra fields for file read observations
+type FileReadExtras struct {
+	Path string `json:"path"`
 }
 
-// FileWriteObservation represents file write output
-type FileWriteObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	Path        string    `json:"path"`
-	Timestamp   time.Time `json:"timestamp"`
+// FileWriteExtras contains extra fields for file write observations
+type FileWriteExtras struct {
+	Path string `json:"path"`
 }
 
-// FileEditObservation represents file edit output
-type FileEditObservation struct {
-	Observation string                 `json:"observation"`
-	Content     string                 `json:"content"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Extras      map[string]interface{} `json:"extras"`
+// FileEditExtras contains extra fields for file edit observations
+type FileEditExtras struct {
+	Path       string `json:"path"`
+	OldContent string `json:"old_content,omitempty"`
+	NewContent string `json:"new_content,omitempty"`
+	ImplSource string `json:"impl_source,omitempty"`
 }
 
-// IPythonRunCellObservation represents IPython execution output
-type IPythonRunCellObservation struct {
-	Observation string                 `json:"observation"`
-	Content     string                 `json:"content"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Extras      map[string]interface{} `json:"extras,omitempty"`
+// BrowserExtras contains extra fields for browser observations
+type BrowserExtras struct {
+	URL        string `json:"url,omitempty"`
+	Screenshot string `json:"screenshot,omitempty"`
 }
 
-// ErrorObservation represents an error
-type ErrorObservation struct {
-	Observation string                 `json:"observation"`
-	Content     string                 `json:"content"`
-	ErrorType   string                 `json:"error_type,omitempty"`
-	Extras      map[string]interface{} `json:"extras,omitempty"`
-	Timestamp   time.Time              `json:"timestamp"`
+// ErrorExtras contains extra fields for error observations
+type ErrorExtras struct {
+	ErrorType string `json:"error_type,omitempty"`
 }
 
-// BrowserObservation represents browser interaction output
-type BrowserObservation struct {
-	Observation string    `json:"observation"`
-	Content     string    `json:"content"`
-	URL         string    `json:"url,omitempty"`
-	Screenshot  string    `json:"screenshot,omitempty"`
-	Timestamp   time.Time `json:"timestamp"`
+// IPythonExtras contains extra fields for IPython observations
+type IPythonExtras struct {
+	// Any additional metadata for IPython observations
+}
+
+// NewCmdOutputObservation creates a new command execution output observation
+func NewCmdOutputObservation(content string, exitCode int, commandID string) Observation[CmdOutputExtras] {
+	return Observation[CmdOutputExtras]{
+		Observation: "cmd_output",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: CmdOutputExtras{
+			ExitCode:  exitCode,
+			CommandID: commandID,
+		},
+	}
+}
+
+// NewFileReadObservation creates a new file read observation
+func NewFileReadObservation(content string, path string) Observation[FileReadExtras] {
+	return Observation[FileReadExtras]{
+		Observation: "read",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: FileReadExtras{
+			Path: path,
+		},
+	}
+}
+
+// NewFileWriteObservation creates a new file write observation
+func NewFileWriteObservation(content string, path string) Observation[FileWriteExtras] {
+	return Observation[FileWriteExtras]{
+		Observation: "write",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: FileWriteExtras{
+			Path: path,
+		},
+	}
+}
+
+// NewFileEditObservation creates a new file edit observation
+func NewFileEditObservation(content string, path string, oldContent string, newContent string, implSource string) Observation[FileEditExtras] {
+	return Observation[FileEditExtras]{
+		Observation: "edit",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: FileEditExtras{
+			Path:       path,
+			OldContent: oldContent,
+			NewContent: newContent,
+			ImplSource: implSource,
+		},
+	}
+}
+
+// NewErrorObservation creates a new error observation
+func NewErrorObservation(content string, errorType string) Observation[ErrorExtras] {
+	return Observation[ErrorExtras]{
+		Observation: "error",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: ErrorExtras{
+			ErrorType: errorType,
+		},
+	}
+}
+
+// NewBrowserObservation creates a new browser interaction output observation
+func NewBrowserObservation(content string, url string, screenshot string) Observation[BrowserExtras] {
+	return Observation[BrowserExtras]{
+		Observation: "browser_output",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras: BrowserExtras{
+			URL:        url,
+			Screenshot: screenshot,
+		},
+	}
 }
 
 // SystemResources represents system resource information from Python get_system_stats()
@@ -140,4 +207,14 @@ type UploadResponse struct {
 // VSCodeConnectionToken represents VSCode connection token
 type VSCodeConnectionToken struct {
 	Token string `json:"token"`
+}
+
+// NewIPythonRunCellObservation creates a new IPython cell execution output observation
+func NewIPythonRunCellObservation(content string) Observation[IPythonExtras] {
+	return Observation[IPythonExtras]{
+		Observation: "ipython_output",
+		Content:     content,
+		Timestamp:   time.Now(),
+		Extras:      IPythonExtras{},
+	}
 }

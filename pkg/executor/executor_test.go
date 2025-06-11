@@ -41,11 +41,11 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err)
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
-		assert.Equal(t, "run", cmdObs.Observation)
+		assert.Equal(t, "cmd_output", cmdObs.Observation)
 		assert.Contains(t, cmdObs.Content, "hello")
-		assert.Equal(t, 0, cmdObs.Extras["exit_code"])
+		assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 	})
 
 	t.Run("command with cwd", func(t *testing.T) {
@@ -63,10 +63,10 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err)
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
 		assert.Contains(t, cmdObs.Content, "testfile.txt")
-		assert.Equal(t, 0, cmdObs.Extras["exit_code"])
+		assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 	})
 
 	t.Run("command with absolute cwd", func(t *testing.T) {
@@ -82,10 +82,10 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err)
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
 		assert.Contains(t, cmdObs.Content, "abs_testfile.txt")
-		assert.Equal(t, 0, cmdObs.Extras["exit_code"])
+		assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 	})
 
 	t.Run("command with timeout", func(t *testing.T) {
@@ -96,7 +96,7 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err) // The function itself shouldn't error, the command should timeout
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
 		// Exit code might vary depending on OS for timeout, so we don't assert it strictly
 		// but it should be non-zero if the process was killed due to timeout.
@@ -104,7 +104,7 @@ func TestExecuteCmdRun(t *testing.T) {
 		// or 137 (128 + 9 for SIGKILL)
 		// For now, we check that the content indicates an issue or is empty
 		// and that the exit code is not 0.
-		assert.NotEqual(t, 0, cmdObs.Extras["exit_code"], "Exit code should be non-zero for a timed-out command")
+		assert.NotEqual(t, 0, cmdObs.Extras.ExitCode, "Exit code should be non-zero for a timed-out command")
 	})
 
 	t.Run("command error", func(t *testing.T) {
@@ -114,9 +114,9 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err)
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
-		assert.NotEqual(t, 0, cmdObs.Extras["exit_code"])
+		assert.NotEqual(t, 0, cmdObs.Extras.ExitCode)
 		// Shells usually return 127 for "command not found"
 		assert.Contains(t, cmdObs.Content, "not found") // or similar error message
 	})
@@ -129,10 +129,10 @@ func TestExecuteCmdRun(t *testing.T) {
 		obs, err := executor.executeCmdRun(ctx, action)
 		assert.NoError(t, err)
 
-		cmdObs, ok := obs.(models.CmdOutputObservation)
+		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
 		assert.Contains(t, cmdObs.Content, "background")
-		assert.Equal(t, 0, cmdObs.Extras["exit_code"])
+		assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 	})
 }
 
@@ -150,11 +150,13 @@ func TestExecuteAction_CmdRun(t *testing.T) {
 	obs, err := executor.ExecuteAction(ctx, actionMap)
 	assert.NoError(t, err)
 
-	cmdObs, ok := obs.(models.CmdOutputObservation)
+	cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 	assert.True(t, ok, "Observation should be CmdOutputObservation")
 
-	assert.Equal(t, "run", cmdObs.Observation)
+	assert.Equal(t, "cmd_output", cmdObs.Observation)
 	assert.Contains(t, cmdObs.Content, "uid=") // "id" command output typically contains "uid="
-	assert.Equal(t, 0, cmdObs.Extras["exit_code"])
-	assert.Equal(t, "id", cmdObs.Extras["command"]) // Should correctly parse "id"
+	assert.Equal(t, 0, cmdObs.Extras.ExitCode)
+
+	// In the new system, commandID is directly in the Extras struct instead of a map
+	assert.NotEmpty(t, cmdObs.Extras.CommandID) // Should have a non-empty command ID
 }

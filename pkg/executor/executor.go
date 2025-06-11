@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -52,8 +53,33 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Executor, error) {
 	return executor, nil
 }
 
+// initWorkingDirectory initializes the working directory
+func (e *Executor) initWorkingDirectory() error {
+	// Check if the working directory exists, create it if it doesn't
+	if e.workingDir == "" {
+		return fmt.Errorf("working directory is not specified")
+	}
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(e.workingDir, 0755); err != nil {
+		return fmt.Errorf("failed to create working directory %s: %w", e.workingDir, err)
+	}
+
+	return nil
+}
+
+// initUser initializes the user for running commands
+func (e *Executor) initUser() error {
+	// No-op for now - in a more sophisticated implementation, this would
+	// create the user if it doesn't exist or validate permissions
+	return nil
+}
+
 // Close cleans up resources, including the persistent bash session
 func (e *Executor) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// Add cleanup logic here
 	return nil
 }
 
@@ -69,12 +95,10 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 	action, err := models.ParseAction(actionMap)
 	if err != nil {
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to parse action: %v", err),
-			ErrorType:   "ActionParsingError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to parse action: %v", err),
+			"ActionParsingError",
+		), nil
 	}
 
 	if actionType, ok := actionMap["action"].(string); ok {
@@ -99,11 +123,9 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 	default:
 		err := fmt.Errorf("unsupported action type: %T", action)
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     err.Error(),
-			ErrorType:   "UnsupportedActionError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(
+			err.Error(),
+			"UnsupportedActionError",
+		), nil
 	}
 }

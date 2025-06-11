@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/internal/models"
 )
@@ -12,12 +11,11 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 	_, span := e.tracer.Start(ctx, "browse_url")
 	defer span.End()
 
-	return models.BrowserObservation{
-		Observation: "browse",
-		Content:     "Browser navigation not implemented in Go runtime",
-		URL:         action.URL,
-		Timestamp:   time.Now(),
-	}, nil
+	return models.NewBrowserObservation(
+		"Browser navigation not implemented in Go runtime",
+		action.URL,
+		"", // No screenshot
+	), nil
 }
 
 // executeBrowseInteractive performs browser interaction (placeholder implementation)
@@ -25,9 +23,9 @@ func (e *Executor) executeBrowseInteractive(ctx context.Context, action models.B
 	_, span := e.tracer.Start(ctx, "browse_interactive")
 	defer span.End()
 
-	return models.BrowserObservation{
-		Observation: "browse",
-		Content:     "Browser interaction not implemented in Go runtime",
-		Timestamp:   time.Now(),
-	}, nil
+	return models.NewBrowserObservation(
+		"Browser interaction not implemented in Go runtime",
+		"", // No URL for interactive browsing
+		"", // No screenshot
+	), nil
 }

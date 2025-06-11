@@ -5,11 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"mime"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -67,43 +65,38 @@ func isChunkPotentiallyBinary(chunk []byte, n int) bool {
 	return false
 }
 
-// handleMediaType checks if the file at the given path is a known media type
-// (e.g., PNG, JPG, PDF, MP4). If so, it reads the file, encodes its content
-// as a base64 data URI, and returns a FileReadObservation.
-// It returns true if the media type was handled, otherwise false.
-func (e *Executor) handleMediaType(ctx context.Context, path string, action models.FileReadAction) (models.FileReadObservation, bool, error) {
-	lowerPath := strings.ToLower(path)
-	if strings.HasSuffix(lowerPath, ".png") || strings.HasSuffix(lowerPath, ".jpg") ||
-		strings.HasSuffix(lowerPath, ".jpeg") || strings.HasSuffix(lowerPath, ".bmp") ||
-		strings.HasSuffix(lowerPath, ".gif") || strings.HasSuffix(lowerPath, ".pdf") ||
-		strings.HasSuffix(lowerPath, ".mp4") || strings.HasSuffix(lowerPath, ".webm") ||
-		strings.HasSuffix(lowerPath, ".ogg") {
-
-		fileData, err := os.ReadFile(path)
+// handleMediaType checks if the file is a media file and handles it appropriately
+func (e *Executor) handleMediaType(ctx context.Context, path string, action models.FileReadAction) (models.Observation[models.FileReadExtras], bool, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".bmp" {
+		// Read the image file
+		imgData, err := os.ReadFile(path)
 		if err != nil {
-			// Instead of returning an empty FileReadObservation, return a zero value and let the caller handle the error
-			return models.FileReadObservation{}, false, err
+			return models.Observation[models.FileReadExtras]{}, true, err
 		}
 
-		mimeType := mime.TypeByExtension(filepath.Ext(path))
-		if mimeType == "" {
-			if strings.HasSuffix(lowerPath, ".pdf") {
-				mimeType = "application/pdf"
-			} else if strings.HasSuffix(lowerPath, ".mp4") {
-				mimeType = "video/mp4"
-			} else {
-				mimeType = "image/png"
-			}
+		// Encode to base64
+		encoded := base64.StdEncoding.EncodeToString(imgData)
+
+		// Determine mime type
+		mimeType := ""
+		switch ext {
+		case ".png":
+			mimeType = "image/png"
+		case ".jpg", ".jpeg":
+			mimeType = "image/jpeg"
+		case ".gif":
+			mimeType = "image/gif"
+		case ".bmp":
+			mimeType = "image/bmp"
 		}
-		mediaContent := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(fileData))
-		return models.FileReadObservation{
-			Observation: "read",
-			Content:     mediaContent,
-			Path:        action.Path,
-			Timestamp:   time.Now(),
-		}, true, nil
+
+		// Format as data URL
+		mediaContent := fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
+
+		return models.NewFileReadObservation(mediaContent, action.Path), true, nil
 	}
-	return models.FileReadObservation{}, false, nil
+	return models.Observation[models.FileReadExtras]{}, false, nil
 }
 
 // executeFileRead reads a file
@@ -123,24 +116,14 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 		errorMsg := fmt.Sprintf("File not found: %s. Your current working directory is %s.", path, cwd)
 		e.logger.Errorf(errorMsg)
 		span.RecordError(statErr)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileReadError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileReadError"), nil
 	}
 
 	// Check if it's a directory
 	if fileInfo.IsDir() {
 		errorMsg := fmt.Sprintf("Path is a directory: %s. You can only read files", path)
 		e.logger.Errorf(errorMsg)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileReadError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileReadError"), nil
 	}
 
 	// Handle media files (images, videos, PDFs)
@@ -148,12 +131,7 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 	if isHandled {
 		if mediaErr != nil {
 			span.RecordError(mediaErr)
-			return models.ErrorObservation{
-				Observation: "error",
-				Content:     fmt.Sprintf("Error reading media file: %v", mediaErr),
-				ErrorType:   "FileReadError",
-				Timestamp:   time.Now(),
-			}, nil
+			return models.NewErrorObservation(fmt.Sprintf("Error reading media file: %v", mediaErr), "FileReadError"), nil
 		}
 		return mediaObservation, nil
 	}
@@ -164,23 +142,13 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 		errorMsg := fmt.Sprintf("Error reading file %s: %v", path, chunkReadErr)
 		e.logger.Errorf(errorMsg)
 		span.RecordError(chunkReadErr)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileReadError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileReadError"), nil
 	}
 
 	if isChunkPotentiallyBinary(buffer, n) {
 		e.logger.Warnf("Binary file detected: %s", path)
 		span.SetAttributes(attribute.Bool("is_binary_file", true))
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     "ERROR_BINARY_FILE",
-			ErrorType:   "BinaryFileError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation("ERROR_BINARY_FILE", "BinaryFileError"), nil
 	}
 
 	// Read the entire file
@@ -189,12 +157,7 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 		errorMsg := fmt.Sprintf("Error reading file %s: %v", path, err)
 		e.logger.Errorf(errorMsg)
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileReadError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileReadError"), nil
 	}
 
 	// Convert to string and handle line ranges
@@ -224,12 +187,7 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 	}
 
 	e.logger.Debugf("Successfully read file: %s (%d bytes)", path, len(contentStr))
-	return models.FileReadObservation{
-		Observation: "read",
-		Content:     contentStr,
-		Path:        action.Path,
-		Timestamp:   time.Now(),
-	}, nil
+	return models.NewFileReadObservation(contentStr, action.Path), nil
 }
 
 // executeFileWrite writes to a file
@@ -248,12 +206,7 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 		errorMsg := fmt.Sprintf("Failed to create directory %s: %v", dirPath, err)
 		e.logger.Errorf(errorMsg)
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileWriteError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileWriteError"), nil
 	}
 
 	// Check if the file exists and get its permissions
@@ -281,12 +234,7 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 			errorMsg := fmt.Sprintf("Failed to read existing file %s for modification: %v", path, readErr)
 			e.logger.Errorf(errorMsg)
 			span.RecordError(readErr)
-			return models.ErrorObservation{
-				Observation: "error",
-				Content:     errorMsg,
-				ErrorType:   "FileWriteError",
-				Timestamp:   time.Now(),
-			}, nil
+			return models.NewErrorObservation(errorMsg, "FileWriteError"), nil
 		}
 
 		// Simple file overwrite
@@ -300,12 +248,7 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 		errorMsg := fmt.Sprintf("Failed to write to file %s: %v", path, err)
 		e.logger.Errorf(errorMsg)
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     errorMsg,
-			ErrorType:   "FileWriteError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(errorMsg, "FileWriteError"), nil
 	}
 
 	// Restore original permissions and ownership if the file existed before
@@ -318,12 +261,7 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 	}
 
 	e.logger.Infof("Successfully wrote to file: %s", path)
-	return models.FileWriteObservation{
-		Observation: "write",
-		Content:     "",
-		Path:        action.Path,
-		Timestamp:   time.Now(),
-	}, nil
+	return models.NewFileWriteObservation("", action.Path), nil
 }
 
 // executeFileCreate creates a new file and returns FileEditObservation
@@ -337,66 +275,37 @@ func (e *Executor) executeFileCreate(ctx context.Context, path, content string) 
 
 	// Check if file already exists
 	if _, err := os.Stat(resolvedPath); err == nil {
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("File already exists: %s", path),
-			ErrorType:   "FileExistsError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(fmt.Sprintf("File already exists: %s", path), "FileExistsError"), nil
 	}
 
 	// Create directory if needed
 	if err := os.MkdirAll(filepath.Dir(resolvedPath), 0755); err != nil {
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to create directory for %s: %v", path, err),
-			ErrorType:   "DirectoryCreationError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(fmt.Sprintf("Failed to create directory for %s: %v", path, err), "DirectoryCreationError"), nil
 	}
 
 	// Write file
 	if err := os.WriteFile(resolvedPath, []byte(content), 0644); err != nil {
 		span.RecordError(err)
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to create file %s: %v", path, err),
-			ErrorType:   "FileCreateError",
-			Timestamp:   time.Now(),
-		}, nil
+		return models.NewErrorObservation(fmt.Sprintf("Failed to create file %s: %v", path, err), "FileCreateError"), nil
 	}
 
-	return models.FileEditObservation{
-		Observation: "edit",
-		Content:     fmt.Sprintf("File created successfully at: %s", path),
-		Timestamp:   time.Now(),
-		Extras: map[string]interface{}{
-			"path":        path,
-			"prev_exist":  false,
-			"old_content": "",
-			"new_content": content,
-			"impl_source": "oh_aci",
-			"diff":        nil,
-			"_diff_cache": nil,
-		},
-	}, nil
+	return models.NewFileEditObservation(fmt.Sprintf("File created successfully at: %s", path), path, "", content, "oh_aci"), nil
 }
 
-// executeFileEdit performs file editing operations
+// executeFileEdit performs file edits using different approaches based on the action command
 func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAction) (interface{}, error) {
-	ctx, span := e.tracer.Start(ctx, "file_edit")
+	_, span := e.tracer.Start(ctx, "file_edit")
 	defer span.End()
 
-	span.SetAttributes(
-		attribute.String("path", action.Path),
-		attribute.String("command", action.Command),
-	)
+	span.SetAttributes(attribute.String("path", action.Path))
+	span.SetAttributes(attribute.String("command", action.Command))
 
 	path := e.resolvePath(action.Path)
 
 	switch action.Command {
 	case "view":
+		// Remap to file read action
 		return e.executeFileRead(ctx, models.FileReadAction{
 			Action: "read",
 			Path:   action.Path,
@@ -404,55 +313,57 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 			End:    0,
 		})
 	case "create":
+		// Create a new file with the provided content
 		return e.executeFileCreate(ctx, action.Path, action.FileText)
 	case "str_replace":
+		if action.OldStr == "" || action.NewStr == "" {
+			return models.NewErrorObservation("String replace requires non-empty old_str and new_str", "FileEditError"), nil
+		}
+		e.logger.Infof("Replacing string in %s", action.Path)
 		return e.executeStringReplace(ctx, path, action.OldStr, action.NewStr)
 	default:
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Unsupported file edit command: %s", action.Command),
-			ErrorType:   "UnsupportedFileEditCommandError",
-			Timestamp:   time.Now(),
-		}, nil
+		// Other edit commands could be implemented here
+		return models.NewErrorObservation(fmt.Sprintf("Unsupported file edit command: %s", action.Command), "UnsupportedEditCommand"), nil
 	}
 }
 
-// executeStringReplace performs string replacement in a file
+// executeStringReplace implements string replacement in a file
 func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newStr string) (interface{}, error) {
-	content, err := os.ReadFile(path)
+	_, span := e.tracer.Start(ctx, "string_replace")
+	defer span.End()
+
+	resolvedPath := e.resolvePath(path)
+
+	// Check if file exists
+	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
+		return models.NewErrorObservation(fmt.Sprintf("File not found: %s", path), "FileEditError"), nil
+	}
+
+	// Read file content
+	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to read file %s: %v", path, err),
-			ErrorType:   "FileReadError",
-			Timestamp:   time.Now(),
-		}, nil
+		span.RecordError(err)
+		return models.NewErrorObservation(fmt.Sprintf("Failed to read file %s: %v", path, err), "FileEditError"), nil
 	}
 
-	contentStr := string(content)
-	newContent := strings.ReplaceAll(contentStr, oldStr, newStr)
+	oldContent := string(content)
 
-	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to write file %s: %v", path, err),
-			ErrorType:   "FileWriteError",
-			Timestamp:   time.Now(),
-		}, nil
+	// Replace string
+	newContent := strings.Replace(oldContent, oldStr, newStr, -1)
+
+	// Check if content changed
+	if oldContent == newContent {
+		return models.NewErrorObservation(fmt.Sprintf("String '%s' not found in %s", oldStr, path), "StringNotFound"), nil
 	}
 
-	return models.FileEditObservation{
-		Observation: "edit",
-		Content:     "File edited successfully",
-		Timestamp:   time.Now(),
-		Extras: map[string]interface{}{
-			"path":        path,
-			"prev_exist":  true,
-			"old_content": contentStr,
-			"new_content": newContent,
-			"impl_source": "oh_aci",
-			"diff":        nil,
-			"_diff_cache": nil,
-		},
-	}, nil
+	// Write modified content back to file
+	if err := os.WriteFile(resolvedPath, []byte(newContent), 0644); err != nil {
+		span.RecordError(err)
+		return models.NewErrorObservation(fmt.Sprintf("Failed to write changes to %s: %v", path, err), "FileEditError"), nil
+	}
+
+	editMsg := fmt.Sprintf("Successfully replaced '%s' with '%s' in %s", oldStr, newStr, path)
+	e.logger.Infof(editMsg)
+
+	return models.NewFileEditObservation(editMsg, path, oldContent, newContent, "str_replace"), nil
 }

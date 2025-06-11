@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"os"
 	"path/filepath"
 )
 
@@ -20,17 +19,4 @@ func (e *Executor) toRelativePath(path string) string {
 		return path
 	}
 	return relPath
-}
-
-// initWorkingDirectory initializes the working directory
-func (e *Executor) initWorkingDirectory() error {
-	if err := os.MkdirAll(e.workingDir, 0755); err != nil {
-		return err
-	}
-
-	if err := os.Chdir(e.workingDir); err != nil {
-		return err
-	}
-
-	return nil
 }

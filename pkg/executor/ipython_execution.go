@@ -1,165 +1,194 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/denysvitali/openhands-runtime-go/internal/models"
 )
 
-// executeIPython executes IPython code using Python subprocess
+// executeIPython executes code in an IPython kernel
 func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunCellAction) (interface{}, error) {
 	_, span := e.tracer.Start(ctx, "ipython_run")
 	defer span.End()
 
-	e.logger.Infof("Executing IPython with code: %s", action.Code)
+	e.logger.Infof("Executing IPython cell: %s", action.Code)
 
-	tmpFile, err := os.CreateTemp("", "ipython_*.py")
+	// Check if Jupyter is installed
+	checkCmd := exec.Command("which", "jupyter")
+	err := checkCmd.Run()
 	if err != nil {
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to create temporary file: %v", err),
-			ErrorType:   "TempFileCreationError",
-			Timestamp:   time.Now(),
-		}, nil
-	}
-	defer func(name string) {
-		_ = os.Remove(name)
-	}(tmpFile.Name())
-
-	wrapperCode := fmt.Sprintf(`
-import sys
-import io
-import traceback
-import json
-import base64
-import matplotlib
-import matplotlib.pyplot as plt
-from contextlib import redirect_stdout, redirect_stderr
-
-matplotlib.use('Agg')
-
-stdout_capture = io.StringIO()
-stderr_capture = io.StringIO()
-result = {"stdout": "", "stderr": "", "images": [], "error": False}
-
-try:
-    with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-        exec('''%s''')
-    
-    if plt.get_fignums():
-        import tempfile
-        images = []
-        for fig_num in plt.get_fignums():
-            fig = plt.figure(fig_num)
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                fig.savefig(tmp.name, format='png', bbox_inches='tight', dpi=150)
-                with open(tmp.name, 'rb') as img_file:
-                    img_data = base64.b64encode(img_file.read()).decode('utf-8')
-                    images.append(f"data:image/png;base64,{img_data}")
-                import os
-                os.unlink(tmp.name)
-            plt.close(fig)
-        result["images"] = images
-    
-    result["stdout"] = stdout_capture.getvalue()
-    result["stderr"] = stderr_capture.getvalue()
-    
-except Exception as e:
-    result["error"] = True
-    result["stderr"] = stderr_capture.getvalue() + "\n" + traceback.format_exc()
-    result["stdout"] = stdout_capture.getvalue()
-
-print("###IPYTHON_RESULT###")
-print(json.dumps(result))
-print("###IPYTHON_END###")
-`, action.Code)
-
-	if _, err := tmpFile.WriteString(wrapperCode); err != nil {
-		_ = tmpFile.Close()
-		return models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to write to temporary file: %v", err),
-			ErrorType:   "TempFileWriteError",
-			Timestamp:   time.Now(),
-		}, nil
-	}
-	_ = tmpFile.Close()
-
-	cmd := exec.CommandContext(ctx, "python3", tmpFile.Name())
-	if e.workingDir != "" {
-		cmd.Dir = e.workingDir
+		errorMsg := "Jupyter is not installed. Please install it with: pip install jupyter"
+		e.logger.Error(errorMsg)
+		return models.NewErrorObservation(errorMsg, "JupyterNotInstalledError"), nil
 	}
 
-	output, err := cmd.CombinedOutput()
-	outputStr := string(output)
+	// Create a temporary notebook file
+	tempDir, err := os.MkdirTemp("", "jupyter")
+	if err != nil {
+		e.logger.Errorf("Failed to create temp directory: %v", err)
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to create temp directory: %v", err),
+			"IPythonError",
+		), nil
+	}
+	defer os.RemoveAll(tempDir)
 
-	e.logger.Infof("Python execution output: %s", outputStr)
+	// Create a simple notebook with the code
+	notebookPath := filepath.Join(tempDir, "notebook.ipynb")
+	notebook := createNotebookWithCode(action.Code)
 
-	resultStartIdx := strings.Index(outputStr, "###IPYTHON_RESULT###")
-	resultEndIdx := strings.Index(outputStr, "###IPYTHON_END###")
-
-	var result struct {
-		Stdout string   `json:"stdout"`
-		Stderr string   `json:"stderr"`
-		Images []string `json:"images"`
-		Error  bool     `json:"error"`
+	notebookJSON, err := json.Marshal(notebook)
+	if err != nil {
+		e.logger.Errorf("Failed to marshal notebook: %v", err)
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to marshal notebook: %v", err),
+			"IPythonError",
+		), nil
 	}
 
-	var content string
-	var imageURLs []string
-
-	if resultStartIdx != -1 && resultEndIdx != -1 {
-		jsonStr := outputStr[resultStartIdx+len("###IPYTHON_RESULT###") : resultEndIdx]
-		jsonStr = strings.TrimSpace(jsonStr)
-
-		if parseErr := json.Unmarshal([]byte(jsonStr), &result); parseErr == nil {
-			content = result.Stdout
-			if result.Stderr != "" {
-				if content != "" {
-					content += "\n"
-				}
-				content += result.Stderr
-			}
-			imageURLs = result.Images
-		} else {
-			content = outputStr
-			e.logger.Warnf("Failed to parse IPython result JSON: %v", parseErr)
-		}
-	} else {
-		content = outputStr
-		if err != nil {
-			content += fmt.Sprintf("\nError: %v", err)
-		}
+	err = os.WriteFile(notebookPath, notebookJSON, 0644)
+	if err != nil {
+		e.logger.Errorf("Failed to write notebook file: %v", err)
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to write notebook file: %v", err),
+			"IPythonError",
+		), nil
 	}
 
-	if action.IncludeExtra {
-		if wd, wdErr := os.Getwd(); wdErr == nil {
-			content += fmt.Sprintf("\n[Current working directory: %s]", wd)
-		}
-		if pythonPath, pathErr := exec.LookPath("python3"); pathErr == nil {
-			content += fmt.Sprintf("\n[Python interpreter: %s]", pythonPath)
-		}
+	// Execute the notebook
+	outputPath := filepath.Join(tempDir, "output.ipynb")
+	cmd := exec.Command(
+		"jupyter", "nbconvert", "--to", "notebook", "--execute",
+		"--ExecutePreprocessor.timeout=60",
+		"--output", outputPath,
+		notebookPath,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errorMsg := fmt.Sprintf("Failed to execute notebook: %v\n%s", err, stderr.String())
+		e.logger.Error(errorMsg)
+		return models.NewErrorObservation(errorMsg, "IPythonExecutionError"), nil
 	}
 
-	observation := models.IPythonRunCellObservation{
-		Observation: "run_ipython",
-		Content:     content,
-		Timestamp:   time.Now(),
-		Extras: map[string]interface{}{
-			"code": action.Code,
+	// Read the output notebook
+	outputJSON, err := os.ReadFile(outputPath)
+	if err != nil {
+		e.logger.Errorf("Failed to read output notebook: %v", err)
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to read output notebook: %v", err),
+			"IPythonError",
+		), nil
+	}
+
+	// Parse the output notebook
+	var outputNotebook map[string]interface{}
+	if err := json.Unmarshal(outputJSON, &outputNotebook); err != nil {
+		e.logger.Errorf("Failed to parse output notebook: %v", err)
+		return models.NewErrorObservation(
+			fmt.Sprintf("Failed to parse output notebook: %v", err),
+			"IPythonError",
+		), nil
+	}
+
+	// Extract the outputs
+	result := extractNotebookOutputs(outputNotebook)
+
+	return models.NewIPythonRunCellObservation(result), nil
+}
+
+// Utility function to create a notebook with a single code cell
+func createNotebookWithCode(code string) map[string]interface{} {
+	return map[string]interface{}{
+		"cells": []map[string]interface{}{
+			{
+				"cell_type":       "code",
+				"execution_count": nil,
+				"metadata":        map[string]interface{}{},
+				"source":          []string{code},
+				"outputs":         []interface{}{},
+			},
 		},
+		"metadata": map[string]interface{}{
+			"kernelspec": map[string]interface{}{
+				"display_name": "Python 3",
+				"language":     "python",
+				"name":         "python3",
+			},
+		},
+		"nbformat":       4,
+		"nbformat_minor": 4,
+	}
+}
+
+// Utility function to extract outputs from a notebook
+func extractNotebookOutputs(notebook map[string]interface{}) string {
+	var result strings.Builder
+
+	cells, ok := notebook["cells"].([]interface{})
+	if !ok || len(cells) == 0 {
+		return "No output"
 	}
 
-	if len(imageURLs) > 0 {
-		observation.Extras["image_urls"] = imageURLs
+	for _, cellInterface := range cells {
+		cell, ok := cellInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		outputs, ok := cell["outputs"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, outputInterface := range outputs {
+			output, ok := outputInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Text output
+			if text, ok := output["text"].([]interface{}); ok {
+				for _, t := range text {
+					if str, ok := t.(string); ok {
+						result.WriteString(str)
+					}
+				}
+			}
+
+			// Data output (like images, HTML, etc.)
+			if data, ok := output["data"].(map[string]interface{}); ok {
+				// Text/plain output
+				if textPlain, ok := data["text/plain"].([]interface{}); ok {
+					for _, t := range textPlain {
+						if str, ok := t.(string); ok {
+							result.WriteString(str)
+							result.WriteString("\n")
+						}
+					}
+				}
+
+				// HTML output is handled specially - just note it was produced
+				if _, ok := data["text/html"]; ok {
+					result.WriteString("[HTML output was produced]\n")
+				}
+
+				// Image output is handled specially - just note it was produced
+				if _, ok := data["image/png"]; ok {
+					result.WriteString("[Image output was produced]\n")
+				}
+			}
+		}
 	}
 
-	e.logger.Infof("Created IPython observation: %+v", observation)
-	return observation, nil
+	return result.String()
 }

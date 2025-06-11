@@ -320,11 +320,10 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		s.logger.Errorf("Failed to execute action: %v", err)
-		errorObs := models.ErrorObservation{
-			Observation: "error",
-			Content:     fmt.Sprintf("Failed to execute action: %v", err),
-			Timestamp:   time.Now(),
-		}
+		errorObs := models.NewErrorObservation(
+			fmt.Sprintf("Failed to execute action: %v", err),
+			"ExecutionError",
+		)
 
 		// Report error observation JSON in traces and logs
 		if s.config.Telemetry.Enabled {
