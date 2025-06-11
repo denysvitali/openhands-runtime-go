@@ -1,0 +1,39 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run Tests
+      run: go test -v ./...
+
+    - name: Run Tests with Race Detection
+      run: go test -race -v ./...
+
+    - name: Run Tests with Coverage
+      run: go test -coverprofile=coverage.out ./...
+
+    - name: Generate Coverage Report
+      run: go tool cover -html=coverage.out -o coverage.html
+
+    - name: Upload Coverage Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage.html 
