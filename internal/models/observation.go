@@ -61,7 +61,7 @@ type IPythonExtras struct {
 // NewCmdOutputObservation creates a new command execution output observation
 func NewCmdOutputObservation(content string, exitCode int, commandID string) Observation[CmdOutputExtras] {
 	return Observation[CmdOutputExtras]{
-		Observation: "cmd_output",
+		Observation: "run",
 		Content:     content,
 		Timestamp:   time.Now(),
 		Extras: CmdOutputExtras{
@@ -125,7 +125,7 @@ func NewErrorObservation(content string, errorID string) Observation[ErrorExtras
 // NewBrowserObservation creates a new browser interaction output observation
 func NewBrowserObservation(content string, url string, screenshot string) Observation[BrowserExtras] {
 	return Observation[BrowserExtras]{
-		Observation: "browser_output",
+		Observation: "browse",
 		Content:     content,
 		Timestamp:   time.Now(),
 		Extras: BrowserExtras{
