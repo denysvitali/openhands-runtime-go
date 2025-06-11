@@ -14,7 +14,8 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 	return models.NewBrowserObservation(
 		"Browser navigation not implemented in Go runtime",
 		action.URL,
-		"", // No screenshot
+		"",       // No screenshot
+		"browse", // trigger by browse action
 	), nil
 }
 
@@ -25,7 +26,8 @@ func (e *Executor) executeBrowseInteractive(ctx context.Context, action models.B
 
 	return models.NewBrowserObservation(
 		"Browser interaction not implemented in Go runtime",
-		"", // No URL for interactive browsing
-		"", // No screenshot
+		"",                   // No URL for interactive browsing
+		"",                   // No screenshot
+		"browse_interactive", // trigger by browse_interactive action
 	), nil
 }

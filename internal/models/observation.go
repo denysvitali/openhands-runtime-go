@@ -45,8 +45,15 @@ type FileEditExtras struct {
 
 // BrowserExtras contains extra fields for browser observations
 type BrowserExtras struct {
-	URL        string `json:"url,omitempty"`
-	Screenshot string `json:"screenshot,omitempty"`
+	URL               string   `json:"url,omitempty"`
+	Screenshot        string   `json:"screenshot,omitempty"`
+	ScreenshotPath    string   `json:"screenshot_path,omitempty"`
+	TriggerByAction   string   `json:"trigger_by_action,omitempty"`
+	OpenPagesURLs     []string `json:"open_pages_urls,omitempty"`
+	ActivePageIndex   int      `json:"active_page_index,omitempty"`
+	LastBrowserAction string   `json:"last_browser_action,omitempty"`
+	Error             bool     `json:"error,omitempty"`
+	FocusedElementBID string   `json:"focused_element_bid,omitempty"`
 }
 
 // ErrorExtras contains extra fields for error observations
@@ -56,7 +63,8 @@ type ErrorExtras struct {
 
 // IPythonExtras contains extra fields for IPython observations
 type IPythonExtras struct {
-	// Any additional metadata for IPython observations
+	Code      string   `json:"code,omitempty"`
+	ImageURLs []string `json:"image_urls,omitempty"`
 }
 
 // NewCmdOutputObservation creates a new command execution output observation
@@ -125,14 +133,15 @@ func NewErrorObservation(content string, errorID string) Observation[ErrorExtras
 }
 
 // NewBrowserObservation creates a new browser interaction output observation
-func NewBrowserObservation(content string, url string, screenshot string) Observation[BrowserExtras] {
+func NewBrowserObservation(content string, url string, screenshot string, triggerByAction string) Observation[BrowserExtras] {
 	return Observation[BrowserExtras]{
 		Observation: "browse",
 		Content:     content,
 		Timestamp:   time.Now(),
 		Extras: BrowserExtras{
-			URL:        url,
-			Screenshot: screenshot,
+			URL:             url,
+			Screenshot:      screenshot,
+			TriggerByAction: triggerByAction,
 		},
 	}
 }
@@ -212,11 +221,14 @@ type VSCodeConnectionToken struct {
 }
 
 // NewIPythonRunCellObservation creates a new IPython cell execution output observation
-func NewIPythonRunCellObservation(content string) Observation[IPythonExtras] {
+func NewIPythonRunCellObservation(content string, code string, imageURLs []string) Observation[IPythonExtras] {
 	return Observation[IPythonExtras]{
 		Observation: "run_ipython",
 		Content:     content,
 		Timestamp:   time.Now(),
-		Extras:      IPythonExtras{},
+		Extras: IPythonExtras{
+			Code:      code,
+			ImageURLs: imageURLs,
+		},
 	}
 }

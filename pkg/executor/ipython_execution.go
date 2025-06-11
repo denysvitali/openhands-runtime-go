@@ -107,7 +107,7 @@ func (e *Executor) executeIPython(ctx context.Context, action models.IPythonRunC
 	// Extract the outputs
 	result := extractNotebookOutputs(outputNotebook)
 
-	return models.NewIPythonRunCellObservation(result), nil
+	return models.NewIPythonRunCellObservation(result, action.Code, []string{}), nil
 }
 
 // Utility function to create a notebook with a single code cell
