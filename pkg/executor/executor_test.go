@@ -43,7 +43,7 @@ func TestExecuteCmdRun(t *testing.T) {
 
 		cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 		assert.True(t, ok)
-		assert.Equal(t, "cmd_output", cmdObs.Observation)
+		assert.Equal(t, "run", cmdObs.Observation)
 		assert.Contains(t, cmdObs.Content, "hello")
 		assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 	})
@@ -153,7 +153,7 @@ func TestExecuteAction_CmdRun(t *testing.T) {
 	cmdObs, ok := obs.(models.Observation[models.CmdOutputExtras])
 	assert.True(t, ok, "Observation should be CmdOutputObservation")
 
-	assert.Equal(t, "cmd_output", cmdObs.Observation)
+	assert.Equal(t, "run", cmdObs.Observation)
 	assert.Contains(t, cmdObs.Content, "uid=") // "id" command output typically contains "uid="
 	assert.Equal(t, 0, cmdObs.Extras.ExitCode)
 
