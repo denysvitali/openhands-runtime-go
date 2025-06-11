@@ -1,10 +1,8 @@
 package executor
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os/exec"
 	"sync"
 	"time"
@@ -29,34 +27,19 @@ type Executor struct {
 	lastExecTime time.Time
 	mu           sync.RWMutex
 	tracer       trace.Tracer
-
-	// Bash session management
-	bashCmd        *exec.Cmd
-	bashStdin      io.WriteCloser
-	bashStdout     *bufio.Reader
-	bashStderr     *bufio.Reader
-	bashMutex      sync.Mutex
-	currentBashCwd string
-
-	// Stdout distribution channels
-	stdoutLines    chan string
-	cmdOutputChans map[string]chan string
-	outputMutex    sync.RWMutex
 }
 
 // New creates a new executor
 func New(cfg *config.Config, logger *logrus.Logger) (*Executor, error) {
 	executor := &Executor{
-		config:         cfg,
-		logger:         logger,
-		workingDir:     cfg.Server.WorkingDir,
-		username:       cfg.Server.Username,
-		userID:         cfg.Server.UserID,
-		startTime:      time.Now(),
-		lastExecTime:   time.Now(),
-		tracer:         otel.Tracer("openhands-runtime"),
-		stdoutLines:    make(chan string, 256),
-		cmdOutputChans: make(map[string]chan string),
+		config:       cfg,
+		logger:       logger,
+		workingDir:   cfg.Server.WorkingDir,
+		username:     cfg.Server.Username,
+		userID:       cfg.Server.UserID,
+		startTime:    time.Now(),
+		lastExecTime: time.Now(),
+		tracer:       otel.Tracer("openhands-runtime"),
 	}
 
 	if err := executor.initWorkingDirectory(); err != nil {
@@ -67,16 +50,12 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Executor, error) {
 		logger.Warnf("Failed to initialize user: %v", err)
 	}
 
-	if err := executor.initBashSession(); err != nil {
-		return nil, fmt.Errorf("failed to initialize bash session: %w", err)
-	}
-
 	return executor, nil
 }
 
 // Close cleans up resources, including the persistent bash session
 func (e *Executor) Close() error {
-	return e.closeBashSession()
+	return nil
 }
 
 // ExecuteAction executes an action and returns an observation
@@ -128,4 +107,66 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 			Timestamp:   time.Now(),
 		}, nil
 	}
+}
+
+// executeCmdRun executes a shell command and returns its output
+func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction) (interface{}, error) {
+	ctx, span := e.tracer.Start(ctx, "cmd_run")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.String("command", action.Command),
+		attribute.String("cwd", action.Cwd),
+		attribute.Bool("is_static", action.IsStatic),
+		attribute.Int("hard_timeout", action.HardTimeout),
+	)
+
+	// Create a new context with timeout if specified
+	if action.HardTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(action.HardTimeout)*time.Second)
+		defer cancel()
+	}
+
+	// Create the command
+	cmd := exec.CommandContext(ctx, "sh", "-c", action.Command)
+
+	// Set working directory if specified
+	if action.Cwd != "" {
+		cmd.Dir = e.resolvePath(action.Cwd)
+	} else {
+		cmd.Dir = e.workingDir
+	}
+
+	// Execute the command and capture output
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	exitCode := 0
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			// Handle other errors (like context cancellation)
+			exitCode = -1
+			if ctx.Err() == context.DeadlineExceeded {
+				outputStr = "Command timed out"
+			} else if ctx.Err() == context.Canceled {
+				outputStr = "Command was cancelled"
+			} else {
+				outputStr = fmt.Sprintf("Command failed: %v", err)
+			}
+		}
+	}
+
+	return models.CmdOutputObservation{
+		Observation: "run",
+		Content:     outputStr,
+		Timestamp:   time.Now(),
+		Extras: map[string]interface{}{
+			"command":   action.Command,
+			"exit_code": exitCode,
+			"cwd":       cmd.Dir,
+		},
+	}, nil
 }
