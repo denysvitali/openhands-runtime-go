@@ -264,7 +264,7 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 	return models.NewFileWriteObservation("", action.Path), nil
 }
 
-// executeFileCreate creates a new file and returns FileEditObservation
+// executeFileCreate creates a new file and returns FileWriteObservation for new files
 func (e *Executor) executeFileCreate(ctx context.Context, path, content string) (interface{}, error) {
 	_, span := e.tracer.Start(ctx, "file_create")
 	defer span.End()
@@ -290,7 +290,8 @@ func (e *Executor) executeFileCreate(ctx context.Context, path, content string) 
 		return models.NewErrorObservation(fmt.Sprintf("Failed to create file %s: %v", path, err), "FileCreateError"), nil
 	}
 
-	return models.NewFileEditObservation(fmt.Sprintf("File created successfully at: %s", path), path, "", content, "oh_aci"), nil
+	// Use FileWriteObservation for new file creation to avoid the assertion error
+	return models.NewFileWriteObservation(fmt.Sprintf("File created successfully at: %s", path), path), nil
 }
 
 // executeFileEdit performs file edits using different approaches based on the action command
