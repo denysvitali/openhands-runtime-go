@@ -111,7 +111,7 @@ func NewFileWriteObservation(content string, path string) Observation[FileWriteE
 func NewFileEditObservation(content string, path string, oldContent string, newContent string, implSource string) Observation[FileEditExtras] {
 	prevExist := oldContent != ""
 	diff := content // In Go implementation, content is the diff
-	
+
 	return Observation[FileEditExtras]{
 		Observation: "edit",
 		Content:     content,

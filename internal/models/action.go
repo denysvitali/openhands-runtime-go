@@ -45,14 +45,14 @@ type FileWriteAction struct {
 
 // FileEditAction represents a file edit action
 type FileEditAction struct {
-	Action     string  `json:"action"`
-	Path       string  `json:"path"`
-	Command    string  `json:"command,omitempty"`
-	FileText   string  `json:"file_text,omitempty"`
-	ViewRange  []int   `json:"view_range,omitempty"`
-	OldStr     string  `json:"old_str,omitempty"`
-	NewStr     string  `json:"new_str,omitempty"`
-	InsertLine *int    `json:"insert_line,omitempty"` // Changed to pointer to handle nil
+	Action     string `json:"action"`
+	Path       string `json:"path"`
+	Command    string `json:"command,omitempty"`
+	FileText   string `json:"file_text,omitempty"`
+	ViewRange  []int  `json:"view_range,omitempty"`
+	OldStr     string `json:"old_str,omitempty"`
+	NewStr     string `json:"new_str,omitempty"`
+	InsertLine *int   `json:"insert_line,omitempty"` // Changed to pointer to handle nil
 	// LLM-based editing fields
 	Content string `json:"content,omitempty"`
 	Start   int    `json:"start,omitempty"`

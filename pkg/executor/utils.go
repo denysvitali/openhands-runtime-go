@@ -29,12 +29,12 @@ func (e *Executor) SecurityCheck(path string) error {
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("path traversal detected: %s", path)
 	}
-	
+
 	// Check for absolute paths outside workspace
 	if filepath.IsAbs(path) && !strings.HasPrefix(path, e.workingDir) {
 		return fmt.Errorf("access denied: path outside workspace: %s", path)
 	}
-	
+
 	// Check for suspicious patterns
 	suspiciousPatterns := []string{"/etc/", "/proc/", "/sys/", "/dev/"}
 	for _, pattern := range suspiciousPatterns {
@@ -42,7 +42,7 @@ func (e *Executor) SecurityCheck(path string) error {
 			return fmt.Errorf("access denied: suspicious path pattern: %s", path)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -54,17 +54,17 @@ func (e *Executor) sanitizeCommand(command string) error {
 		"sudo rm",
 		"chmod -R 777",
 		"dd if=",
-		":(){ :|: & };:",  // Fork bomb
+		":(){ :|: & };:", // Fork bomb
 		"mkfs.",
 		"fdisk",
 	}
-	
+
 	lowerCmd := strings.ToLower(command)
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(lowerCmd, pattern) {
 			return fmt.Errorf("potentially dangerous command detected: %s", pattern)
 		}
 	}
-	
+
 	return nil
 }

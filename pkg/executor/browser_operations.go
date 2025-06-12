@@ -60,13 +60,13 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 	}
 
 	content := string(body)
-	
+
 	// Basic HTML stripping for better readability (very simple implementation)
 	if strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
 		content = e.stripBasicHTML(content)
 	}
 
-	result := fmt.Sprintf("Successfully browsed %s (Status: %d)\n\nContent:\n%s", 
+	result := fmt.Sprintf("Successfully browsed %s (Status: %d)\n\nContent:\n%s",
 		action.URL, resp.StatusCode, content)
 
 	if len(content) >= maxBodySize {
@@ -104,18 +104,18 @@ func (e *Executor) stripBasicHTML(content string) string {
 	// Remove script and style tags entirely
 	content = removeTagsAndContent(content, "script")
 	content = removeTagsAndContent(content, "style")
-	
+
 	// Remove common HTML tags but keep content
-	tags := []string{"html", "head", "body", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", 
+	tags := []string{"html", "head", "body", "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6",
 		"a", "img", "br", "hr", "ul", "ol", "li", "table", "tr", "td", "th", "thead", "tbody"}
-	
+
 	for _, tag := range tags {
 		content = strings.ReplaceAll(content, "<"+tag+">", "")
 		content = strings.ReplaceAll(content, "</"+tag+">", "")
 		// Remove tags with attributes
 		content = removeTagsWithAttributes(content, tag)
 	}
-	
+
 	return strings.TrimSpace(content)
 }
 
@@ -123,31 +123,31 @@ func (e *Executor) stripBasicHTML(content string) string {
 func removeTagsAndContent(content, tag string) string {
 	startTag := "<" + tag
 	endTag := "</" + tag + ">"
-	
+
 	for {
 		start := strings.Index(strings.ToLower(content), strings.ToLower(startTag))
 		if start == -1 {
 			break
 		}
-		
+
 		// Find the end of the opening tag
 		tagEnd := strings.Index(content[start:], ">")
 		if tagEnd == -1 {
 			break
 		}
 		tagEnd += start + 1
-		
+
 		// Find the closing tag
 		end := strings.Index(strings.ToLower(content[tagEnd:]), strings.ToLower(endTag))
 		if end == -1 {
 			break
 		}
 		end += tagEnd + len(endTag)
-		
+
 		// Remove the entire tag and its content
 		content = content[:start] + content[end:]
 	}
-	
+
 	return content
 }
 
@@ -159,15 +159,15 @@ func removeTagsWithAttributes(content, tag string) string {
 		if start == -1 {
 			break
 		}
-		
+
 		end := strings.Index(content[start:], ">")
 		if end == -1 {
 			break
 		}
 		end += start + 1
-		
+
 		content = content[:start] + content[end:]
 	}
-	
+
 	return content
 }
