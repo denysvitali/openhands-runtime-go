@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -404,19 +406,56 @@ func (s *Server) handleDownloadFiles(c *gin.Context) {
 	ctx, span := tracer.Start(c.Request.Context(), "handle_download_file")
 	defer span.End()
 
+	// Support both single path and multiple paths parameters
 	path := c.Query("path")
-	if path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "path query parameter is required"})
+	paths := c.QueryArray("paths")
+
+	// If no paths specified, fall back to single path parameter
+	if len(paths) == 0 && path != "" {
+		paths = []string{path}
+	}
+
+	if len(paths) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path or paths query parameter is required"})
 		return
 	}
 
-	content, err := s.executor.DownloadFile(ctx, path)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to download file: %v", err)})
-		return
+	s.logger.Debugf("Downloading files: %v", paths)
+
+	// Validate that all paths are absolute and secure
+	for _, p := range paths {
+		if !filepath.IsAbs(p) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Path must be an absolute path: %s", p)})
+			return
+		}
+
+		// Security validation happens in the executor methods, but we can do basic checks here
+		// Check if path exists
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("File not found: %s", p)})
+			return
+		}
 	}
 
-	c.Data(http.StatusOK, "application/octet-stream", content)
+	// Determine filename for the zip
+	var filename string
+	if len(paths) == 1 {
+		filename = fmt.Sprintf("%s.zip", filepath.Base(paths[0]))
+	} else {
+		filename = "download.zip"
+	}
+
+	// Set headers for file download
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Type", "application/zip")
+
+	// Stream the zip file directly to the response writer
+	if err := s.executor.StreamZipArchiveMultiple(ctx, paths, c.Writer); err != nil {
+		s.logger.Errorf("Error streaming zip file: %v", err)
+		// At this point headers are already sent, so we can't send a JSON error
+		// The client will see a truncated/corrupted zip file
+		return
+	}
 }
 
 // handleListFiles handles file listing requests
