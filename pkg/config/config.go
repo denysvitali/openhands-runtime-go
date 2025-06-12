@@ -21,6 +21,7 @@ type ServerConfig struct {
 	Plugins            []string `mapstructure:"plugins"`
 	Username           string   `mapstructure:"username"`
 	UserID             int      `mapstructure:"user_id"`
+	Host               string   `mapstructure:"host"`
 	BrowserGymEvalEnv  string   `mapstructure:"browsergym_eval_env"`
 	SessionAPIKey      string   `mapstructure:"session_api_key"`
 	FileViewerPort     int      `mapstructure:"file_viewer_port"`
