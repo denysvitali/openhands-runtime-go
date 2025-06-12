@@ -107,6 +107,11 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 	span.SetAttributes(attribute.String("path", action.Path))
 	e.logger.Infof("Reading file: %s", action.Path)
 
+	// Security check
+	if err := e.SecurityCheck(action.Path); err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Security error: %v", err), "SecurityError"), nil
+	}
+
 	path := e.resolvePath(action.Path)
 	cwd, _ := os.Getwd()
 
@@ -197,6 +202,11 @@ func (e *Executor) executeFileWrite(ctx context.Context, action models.FileWrite
 
 	span.SetAttributes(attribute.String("path", action.Path))
 	e.logger.Infof("Writing to file: %s", action.Path)
+
+	// Security check
+	if err := e.SecurityCheck(action.Path); err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Security error: %v", err), "SecurityError"), nil
+	}
 
 	path := e.resolvePath(action.Path)
 
@@ -304,6 +314,12 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 
 	path := e.resolvePath(action.Path)
 
+	// Handle LLM-based editing when content is provided
+	if action.Content != "" {
+		return e.executeLLMBasedEdit(ctx, action)
+	}
+
+	// Handle ACI-based editing with specific commands
 	switch action.Command {
 	case "view":
 		// Remap to file read action
@@ -322,10 +338,186 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 		}
 		e.logger.Infof("Replacing string in %s", action.Path)
 		return e.executeStringReplace(ctx, path, action.OldStr, action.NewStr)
+	case "insert":
+		if action.InsertLine == nil || action.NewStr == "" {
+			return models.NewErrorObservation("Insert requires insert_line and new_str", "FileEditError"), nil
+		}
+		e.logger.Infof("Inserting text at line %d in %s", *action.InsertLine, action.Path)
+		return e.executeInsert(ctx, action.Path, *action.InsertLine, action.NewStr)
+	case "undo_edit":
+		// TODO: Implement undo functionality
+		return models.NewErrorObservation("Undo edit not yet implemented", "UnsupportedEditCommand"), nil
 	default:
-		// Other edit commands could be implemented here
+		// Unknown command
 		return models.NewErrorObservation(fmt.Sprintf("Unsupported file edit command: %s", action.Command), "UnsupportedEditCommand"), nil
 	}
+}
+
+// executeLLMBasedEdit handles LLM-based file editing using content, start, and end fields
+func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEditAction) (interface{}, error) {
+	_, span := e.tracer.Start(ctx, "llm_based_edit")
+	defer span.End()
+
+	resolvedPath := e.resolvePath(action.Path)
+
+	// Check if file exists
+	originalContent := ""
+
+	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
+		// File doesn't exist, we'll create it
+		e.logger.Infof("Creating new file: %s", action.Path)
+
+		// For new files, just write the content
+		if err := os.MkdirAll(filepath.Dir(resolvedPath), 0755); err != nil {
+			return models.NewErrorObservation(fmt.Sprintf("Failed to create directory for %s: %v", action.Path, err), "FileEditError"), nil
+		}
+
+		if err := os.WriteFile(resolvedPath, []byte(action.Content), 0644); err != nil {
+			return models.NewErrorObservation(fmt.Sprintf("Failed to create file %s: %v", action.Path, err), "FileEditError"), nil
+		}
+
+		// Generate diff for new file
+		diff := e.generateDiff("", action.Content, action.Path)
+
+		return models.NewFileEditObservation(
+			diff,
+			action.Path,
+			"",             // old_content
+			action.Content, // new_content
+			"llm_edit",
+		), nil
+	}
+
+	// File exists, read original content
+	content, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Failed to read file %s: %v", action.Path, err), "FileEditError"), nil
+	}
+	originalContent = string(content)
+
+	// Handle line-based editing
+	lines := strings.Split(originalContent, "\n")
+	totalLines := len(lines)
+
+	// Validate start and end parameters
+	start := action.Start
+	end := action.End
+
+	if start < 1 && start != -1 {
+		start = 1
+	}
+	if end < 1 || end > totalLines {
+		end = totalLines
+	}
+	if start > totalLines {
+		start = totalLines
+	}
+	if start > end && end != -1 && start != -1 {
+		return models.NewErrorObservation(
+			fmt.Sprintf("Invalid range: start=%d, end=%d, total lines=%d", start, end, totalLines),
+			"FileEditError",
+		), nil
+	}
+
+	var newContent string
+
+	if start == -1 {
+		// Append to end of file
+		newContent = originalContent + "\n" + action.Content
+	} else {
+		// Replace lines in range [start, end]
+		startIdx := start - 1 // Convert to 0-based
+		endIdx := end         // end is inclusive, so we don't subtract 1
+
+		if endIdx == -1 {
+			endIdx = totalLines
+		}
+
+		// Split content into lines for insertion
+		contentLines := strings.Split(action.Content, "\n")
+
+		// Build new content
+		newLines := make([]string, 0)
+		newLines = append(newLines, lines[:startIdx]...)
+		newLines = append(newLines, contentLines...)
+		newLines = append(newLines, lines[endIdx:]...)
+
+		newContent = strings.Join(newLines, "\n")
+	}
+
+	// Write the new content
+	if err := os.WriteFile(resolvedPath, []byte(newContent), 0644); err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Failed to write to file %s: %v", action.Path, err), "FileEditError"), nil
+	}
+
+	// Generate diff
+	diff := e.generateDiff(originalContent, newContent, action.Path)
+
+	e.logger.Infof("Successfully edited file: %s", action.Path)
+
+	return models.NewFileEditObservation(
+		diff,
+		action.Path,
+		originalContent,
+		newContent,
+		"llm_edit",
+	), nil
+}
+
+// executeInsert inserts text after a specific line
+func (e *Executor) executeInsert(ctx context.Context, path string, insertLine int, newStr string) (interface{}, error) {
+	_, span := e.tracer.Start(ctx, "insert_text")
+	defer span.End()
+
+	resolvedPath := e.resolvePath(path)
+
+	// Check if file exists
+	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
+		return models.NewErrorObservation(fmt.Sprintf("File not found: %s", path), "FileEditError"), nil
+	}
+
+	// Read file content
+	content, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Failed to read file %s: %v", path, err), "FileEditError"), nil
+	}
+
+	originalContent := string(content)
+	lines := strings.Split(originalContent, "\n")
+
+	// Validate insert line
+	if insertLine < 0 || insertLine > len(lines) {
+		return models.NewErrorObservation(
+			fmt.Sprintf("Invalid insert line %d. File has %d lines", insertLine, len(lines)),
+			"FileEditError",
+		), nil
+	}
+
+	// Insert the new string after the specified line
+	newLines := make([]string, 0, len(lines)+1)
+	newLines = append(newLines, lines[:insertLine]...)
+	newLines = append(newLines, newStr)
+	newLines = append(newLines, lines[insertLine:]...)
+
+	newContent := strings.Join(newLines, "\n")
+
+	// Write the modified content
+	if err := os.WriteFile(resolvedPath, []byte(newContent), 0644); err != nil {
+		return models.NewErrorObservation(fmt.Sprintf("Failed to write to file %s: %v", path, err), "FileEditError"), nil
+	}
+
+	// Generate diff
+	diff := e.generateDiff(originalContent, newContent, path)
+
+	e.logger.Infof("Successfully inserted text at line %d in %s", insertLine, path)
+
+	return models.NewFileEditObservation(
+		diff, // Use the diff instead of a static message
+		path,
+		originalContent,
+		newContent,
+		"insert",
+	), nil
 }
 
 // executeStringReplace implements string replacement in a file
@@ -367,4 +559,47 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 	e.logger.Infof(editMsg)
 
 	return models.NewFileEditObservation(editMsg, path, oldContent, newContent, "str_replace"), nil
+}
+
+// generateDiff creates a simple diff representation between old and new content
+func (e *Executor) generateDiff(oldContent, newContent, filename string) string {
+	if oldContent == newContent {
+		return "No changes made"
+	}
+
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	var diff strings.Builder
+	diff.WriteString(fmt.Sprintf("--- %s\n", filename))
+	diff.WriteString(fmt.Sprintf("+++ %s\n", filename))
+
+	// Simple line-by-line diff (basic implementation)
+	maxLen := len(oldLines)
+	if len(newLines) > maxLen {
+		maxLen = len(newLines)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		oldLine := ""
+		newLine := ""
+
+		if i < len(oldLines) {
+			oldLine = oldLines[i]
+		}
+		if i < len(newLines) {
+			newLine = newLines[i]
+		}
+
+		if oldLine != newLine {
+			if oldLine != "" {
+				diff.WriteString(fmt.Sprintf("-%s\n", oldLine))
+			}
+			if newLine != "" {
+				diff.WriteString(fmt.Sprintf("+%s\n", newLine))
+			}
+		}
+	}
+
+	return diff.String()
 }

@@ -41,6 +41,8 @@ type FileEditExtras struct {
 	OldContent string `json:"old_content,omitempty"`
 	NewContent string `json:"new_content,omitempty"`
 	ImplSource string `json:"impl_source,omitempty"`
+	PrevExist  bool   `json:"prev_exist,omitempty"`
+	Diff       string `json:"diff,omitempty"`
 }
 
 // BrowserExtras contains extra fields for browser observations
@@ -107,6 +109,9 @@ func NewFileWriteObservation(content string, path string) Observation[FileWriteE
 
 // NewFileEditObservation creates a new file edit observation
 func NewFileEditObservation(content string, path string, oldContent string, newContent string, implSource string) Observation[FileEditExtras] {
+	prevExist := oldContent != ""
+	diff := content // In Go implementation, content is the diff
+	
 	return Observation[FileEditExtras]{
 		Observation: "edit",
 		Content:     content,
@@ -116,6 +121,8 @@ func NewFileEditObservation(content string, path string, oldContent string, newC
 			OldContent: oldContent,
 			NewContent: newContent,
 			ImplSource: implSource,
+			PrevExist:  prevExist,
+			Diff:       diff,
 		},
 	}
 }

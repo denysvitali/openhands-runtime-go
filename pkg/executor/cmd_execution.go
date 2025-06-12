@@ -27,6 +27,17 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	// Log the command execution
 	e.logger.Infof("Executing command: %s", action.Command)
 
+	// Security check for command injection
+	if err := e.sanitizeCommand(action.Command); err != nil {
+		e.logger.Warnf("Potentially dangerous command blocked: %s", action.Command)
+		return models.NewCmdOutputObservation(
+			fmt.Sprintf("Command blocked for security reasons: %v", err),
+			1, // Exit code 1 for blocked command
+			"",
+			action.Command,
+		), nil
+	}
+
 	// Set working directory if specified
 	cwd := e.workingDir
 	if action.Cwd != "" {

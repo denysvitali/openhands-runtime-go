@@ -12,3 +12,8 @@ type ListFilesRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
 }
+
+// MCPServerRequest represents a request to update MCP servers
+type MCPServerRequest struct {
+	Tools []interface{} `json:"tools,omitempty"`
+}
