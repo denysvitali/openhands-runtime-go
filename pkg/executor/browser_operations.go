@@ -45,7 +45,12 @@ func (e *Executor) executeBrowseURL(ctx context.Context, action models.BrowseURL
 			"browse",
 		), nil
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			e.logger.Errorf("Failed to close response body: %v", err)
+		}
+	}(resp.Body)
 
 	// Read response body (limit to prevent memory issues)
 	const maxBodySize = 1024 * 1024 // 1MB limit
