@@ -117,12 +117,14 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 		path = e.workingDir
 	}
 
-	if err := e.validatePathSecurity(path); err != nil {
+	// Resolve the path first to convert relative paths to absolute paths
+	resolvedPath := e.resolvePath(path)
+
+	// Then validate the resolved absolute path
+	if err := e.validatePathSecurity(resolvedPath); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
-
-	resolvedPath := e.resolvePath(path)
 
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return []string{}, nil
@@ -154,6 +156,12 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 	})
 
 	result := append(directories, files...)
+
+	// Ensure we return an empty slice instead of nil if no files found
+	if result == nil {
+		result = []string{}
+	}
+
 	return result, nil
 }
 
