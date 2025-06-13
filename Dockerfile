@@ -17,7 +17,6 @@ FROM alpine:latest
 RUN apk --no-cache add \
     ca-certificates \
     bash \
-    bazel \
     curl \
     busybox \
     wget \
@@ -26,7 +25,7 @@ RUN apk --no-cache add \
     golangci-lint \
     nix \
     jq \
-    rg \
+    ripgrep \
     perl \
     python3 \
     ipython \
@@ -55,6 +54,13 @@ RUN apk --no-cache add \
     nano \
     kubectl \
     helm
+
+# Install Bazel (not available as Alpine package)
+RUN BAZEL_VERSION=$(wget -qO- https://api.github.com/repos/bazelbuild/bazel/releases/latest | grep '"tag_name"' | cut -d'"' -f4) && \
+    wget -O /tmp/bazel-installer.sh "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh" && \
+    chmod +x /tmp/bazel-installer.sh && \
+    /tmp/bazel-installer.sh && \
+    rm /tmp/bazel-installer.sh
 
 # Install essential Go tools for monorepo development
 RUN go install github.com/bazelbuild/buildtools/buildifier@latest && \
