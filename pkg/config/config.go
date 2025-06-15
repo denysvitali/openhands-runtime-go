@@ -26,6 +26,7 @@ type ServerConfig struct {
 	FileViewerPort     int      `mapstructure:"file_viewer_port"`
 	MaxMemoryGB        int      `mapstructure:"max_memory_gb"`
 	NoChangeTimeoutSec int      `mapstructure:"no_change_timeout_seconds"`
+	MaxFileSize        int64    `mapstructure:"max_file_size"`
 }
 
 // TelemetryConfig contains telemetry configuration
@@ -68,6 +69,7 @@ func setDefaults() {
 	viper.SetDefault("server.file_viewer_port", 0) // Auto-assign
 	viper.SetDefault("server.max_memory_gb", 0)    // No limit
 	viper.SetDefault("server.no_change_timeout_seconds", 10)
+	viper.SetDefault("server.max_file_size", 50*1024) // 50KB
 
 	// Telemetry defaults
 	viper.SetDefault("telemetry.enabled", true)
