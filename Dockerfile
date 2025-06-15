@@ -53,9 +53,8 @@ RUN apk --no-cache add \
     vim \
     nano \
     kubectl \
-\
-    helm
-    nodejs
+    helm \
+    nodejs \
     npm
 
 # Install Bazel (not available as Alpine package)
