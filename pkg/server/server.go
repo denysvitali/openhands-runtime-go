@@ -381,10 +381,7 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 	}
 
 	// Set headers for streaming
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
+	setSSEHeaders(c)
 
 	// Create a channel for streaming output
 	outputChan := make(chan string, 100)
@@ -622,16 +619,21 @@ func (s *Server) handleUpdateMCPServer(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// handleSSE handles Server-Sent Events for streaming communication
-func (s *Server) handleSSE(c *gin.Context) {
-	// Authentication is handled by middleware
-	
-	// Set headers for SSE
+// setSSEHeaders sets the standard headers required for Server-Sent Events
+func setSSEHeaders(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("Access-Control-Allow-Headers", "Cache-Control")
+}
+
+// handleSSE handles Server-Sent Events for streaming communication
+func (s *Server) handleSSE(c *gin.Context) {
+	// Authentication is handled by middleware
+	
+	// Set headers for SSE
+	setSSEHeaders(c)
 
 	// For now, this is a basic implementation that keeps the connection alive
 	// In a full implementation, this would handle MCP protocol messages
