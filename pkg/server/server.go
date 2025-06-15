@@ -678,9 +678,13 @@ func (s *Server) handleSSE(c *gin.Context) {
 			"timestamp": time.Now().Unix(),
 		},
 	})
+	// Ensure the initial message is flushed to the client immediately
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
 
-	// Keep connection alive with periodic heartbeat
-	ticker := time.NewTicker(30 * time.Second)
+	// Keep connection alive with periodic heartbeat (e.g., every 15 seconds)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	// Create a channel to handle client disconnect
