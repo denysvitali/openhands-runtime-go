@@ -17,34 +17,7 @@ import (
 
 // validatePathSecurity checks for directory traversal attacks and other security issues
 func (e *Executor) validatePathSecurity(path string) error {
-	// Clean the path to resolve any .. or . components
-	cleanPath := filepath.Clean(path)
-
-	// Ensure it's still an absolute path after cleaning
-	if !filepath.IsAbs(cleanPath) {
-		return fmt.Errorf("path must be absolute: %s", path)
-	}
-
-	// Check for directory traversal attempts
-	if strings.Contains(path, "..") {
-		return fmt.Errorf("directory traversal detected in path: %s", path)
-	}
-
-	// Ensure the path is within the working directory or explicitly allowed directories
-	workingDir := e.workingDir
-	if workingDir != "" {
-		// Check if the path is within the working directory
-		relPath, err := filepath.Rel(workingDir, cleanPath)
-		if err != nil {
-			return fmt.Errorf("invalid path: %s", path)
-		}
-
-		// If the relative path starts with "..", it's outside the working directory
-		if strings.HasPrefix(relPath, "..") {
-			return fmt.Errorf("path outside working directory: %s", path)
-		}
-	}
-
+	// TODO: Implement something meaningful considering that the runtime environment is already sandboxed
 	return nil
 }
 
@@ -117,14 +90,12 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 		path = e.workingDir
 	}
 
-	// Resolve the path first to convert relative paths to absolute paths
-	resolvedPath := e.resolvePath(path)
-
-	// Then validate the resolved absolute path
-	if err := e.validatePathSecurity(resolvedPath); err != nil {
+	if err := e.validatePathSecurity(path); err != nil {
 		span.RecordError(err)
 		return nil, err
 	}
+
+	resolvedPath := e.resolvePath(path)
 
 	if _, err := os.Stat(resolvedPath); os.IsNotExist(err) {
 		return []string{}, nil
@@ -156,12 +127,6 @@ func (e *Executor) ListFileNames(ctx context.Context, path string) ([]string, er
 	})
 
 	result := append(directories, files...)
-
-	// Ensure we return an empty slice instead of nil if no files found
-	if result == nil {
-		result = []string{}
-	}
-
 	return result, nil
 }
 

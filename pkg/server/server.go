@@ -11,24 +11,27 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/denysvitali/openhands-runtime-go/internal/models"
-	"github.com/denysvitali/openhands-runtime-go/pkg/config"
-	"github.com/denysvitali/openhands-runtime-go/pkg/executor"
-	"github.com/denysvitali/openhands-runtime-go/pkg/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/denysvitali/openhands-runtime-go/internal/models"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/executor"
+	"github.com/denysvitali/openhands-runtime-go/pkg/mcp"
+	"github.com/denysvitali/openhands-runtime-go/pkg/telemetry"
 )
 
 // Server represents the HTTP server
 type Server struct {
-	config   *config.Config
-	logger   *logrus.Logger
-	executor *executor.Executor
-	engine   *gin.Engine
-	server   *http.Server
+	config    *config.Config
+	logger    *logrus.Logger
+	executor  *executor.Executor
+	engine    *gin.Engine
+	server    *http.Server
+	mcpServer *mcp.Server
 }
 
 // New creates a new server instance
@@ -67,10 +70,11 @@ func New(cfg *config.Config, logger *logrus.Logger) (*Server, error) {
 	}
 
 	server := &Server{
-		config:   cfg,
-		logger:   logger,
-		executor: exec,
-		engine:   engine,
+		config:    cfg,
+		logger:    logger,
+		executor:  exec,
+		engine:    engine,
+		mcpServer: mcp.NewServer(logger, exec),
 	}
 
 	// Setup routes
@@ -661,57 +665,8 @@ func setSSEHeaders(c *gin.Context) {
 
 // handleSSE handles Server-Sent Events for streaming communication
 func (s *Server) handleSSE(c *gin.Context) {
-	// Authentication is handled by middleware
-
-	// Set headers for SSE
-	setSSEHeaders(c)
-
-	// For now, this is a basic implementation that keeps the connection alive
-	// In a full implementation, this would handle MCP protocol messages
-	s.logger.Info("SSE connection established")
-
-	// Send initial connection message
-	c.SSEvent("message", gin.H{
-		"type": "connection",
-		"data": gin.H{
-			"status":    "connected",
-			"timestamp": time.Now().Unix(),
-		},
-	})
-	// Ensure the initial message is flushed to the client immediately
-	if flusher, ok := c.Writer.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
-	// Keep connection alive with periodic heartbeat (e.g., every 15 seconds)
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-
-	// Create a channel to handle client disconnect
-	clientGone := c.Request.Context().Done()
-
-	for {
-		select {
-		case <-clientGone:
-			s.logger.Info("SSE client disconnected")
-			return
-		case <-ticker.C:
-			// Send heartbeat - check if client is still connected
-			select {
-			case <-clientGone:
-				s.logger.Info("SSE client disconnected during heartbeat")
-				return
-			default:
-				// Client still connected, send heartbeat
-				c.SSEvent("heartbeat", gin.H{
-					"timestamp": time.Now().Unix(),
-				})
-				if flusher, ok := c.Writer.(http.Flusher); ok {
-					flusher.Flush()
-				}
-			}
-		}
-	}
+	// Delegate to the MCP server's SSE handler
+	s.mcpServer.HandleSSE(c)
 }
 
 // ginLogger creates a gin logger middleware using logrus

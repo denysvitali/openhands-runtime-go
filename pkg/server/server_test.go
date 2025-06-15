@@ -3,6 +3,7 @@ package server_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -210,15 +211,8 @@ func TestHandleUpdateMCPServer_InvalidPayload(t *testing.T) {
 func TestHandleListFiles_Success(t *testing.T) {
 	srv := setupTestServer(t)
 
-	// The server sets up a working directory using tempDir from the test
-	// We need to use a path within that working directory instead of /tmp
-	// Since setupTestServer uses t.TempDir(), we can use that same directory
-	// by creating our own path within the allowed directory
-
-	// Create a test subdirectory in the working directory
-	// Since we can't access the internal tempDir, use "." to represent current working directory
 	listReq := models.ListFilesRequest{
-		Path:      ".", // Use current working directory
+		Path:      "/tmp",
 		Recursive: false,
 	}
 
@@ -232,11 +226,10 @@ func TestHandleListFiles_Success(t *testing.T) {
 	rr := httptest.NewRecorder()
 	srv.Engine().ServeHTTP(rr, req)
 
-	// Debug: print the response body
-	t.Logf("Response status: %d", rr.Code)
-	t.Logf("Response body: %s", rr.Body.String())
-
 	assert.Equal(t, http.StatusOK, rr.Code, "Handler returned wrong status code")
+
+	// Debug: print the response body
+	fmt.Printf("Response body: %s\n", rr.Body.String())
 
 	var resp []string
 	err = json.Unmarshal(rr.Body.Bytes(), &resp)

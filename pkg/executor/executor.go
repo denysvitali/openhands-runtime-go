@@ -129,3 +129,28 @@ func (e *Executor) ExecuteAction(ctx context.Context, actionMap map[string]inter
 		), nil
 	}
 }
+
+// RunCommand executes a command and returns the result
+// This is a simplified wrapper for MCP usage
+func (e *Executor) RunCommand(command string) (*models.Observation[models.CmdOutputExtras], error) {
+	ctx := context.Background()
+	
+	// Create a CmdRunAction
+	action := models.CmdRunAction{
+		Command: command,
+		Cwd:     e.workingDir,
+	}
+	
+	// Execute the action
+	result, err := e.executeCmdRun(ctx, action)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Convert result to CmdOutputObservation
+	if obs, ok := result.(models.Observation[models.CmdOutputExtras]); ok {
+		return &obs, nil
+	}
+	
+	return nil, fmt.Errorf("unexpected result type: %T", result)
+}
