@@ -415,7 +415,7 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 
 	// Send initial message
 	c.SSEvent("start", gin.H{
-		"command": command,
+		"command":   command,
 		"timestamp": time.Now().Unix(),
 	})
 	if flusher, ok := c.Writer.(http.Flusher); ok {
@@ -424,7 +424,7 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 
 	// Stream output lines with client disconnect detection
 	clientGone := c.Request.Context().Done()
-	streamLoop:
+streamLoop:
 	for {
 		select {
 		case <-clientGone:
@@ -442,7 +442,7 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 				return
 			default:
 				c.SSEvent("output", gin.H{
-					"data": line,
+					"data":      line,
 					"timestamp": time.Now().Unix(),
 				})
 				if flusher, ok := c.Writer.(http.Flusher); ok {
@@ -459,7 +459,7 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 		return
 	default:
 		c.SSEvent("complete", gin.H{
-			"command": command,
+			"command":   command,
 			"timestamp": time.Now().Unix(),
 		})
 		if flusher, ok := c.Writer.(http.Flusher); ok {
@@ -662,7 +662,7 @@ func setSSEHeaders(c *gin.Context) {
 // handleSSE handles Server-Sent Events for streaming communication
 func (s *Server) handleSSE(c *gin.Context) {
 	// Authentication is handled by middleware
-	
+
 	// Set headers for SSE
 	setSSEHeaders(c)
 
@@ -674,7 +674,7 @@ func (s *Server) handleSSE(c *gin.Context) {
 	c.SSEvent("message", gin.H{
 		"type": "connection",
 		"data": gin.H{
-			"status": "connected",
+			"status":    "connected",
 			"timestamp": time.Now().Unix(),
 		},
 	})
@@ -785,12 +785,12 @@ func authMiddleware(expectedAPIKey string) gin.HandlerFunc {
 		}
 
 		apiKey := c.GetHeader("X-Session-API-Key")
-		
+
 		// For SSE endpoints, also check query parameters as fallback
 		if apiKey == "" && path == "/sse" {
 			apiKey = c.Query("api_key")
 		}
-		
+
 		if apiKey != expectedAPIKey {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid API Key"})
 			c.Abort()

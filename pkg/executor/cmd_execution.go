@@ -198,11 +198,11 @@ func (e *Executor) StreamCommandExecution(ctx context.Context, action models.Cmd
 	// Stream output from both stdout and stderr
 	go func() {
 		defer close(outputChan)
-		
+
 		// Create channels for stdout and stderr
 		stdoutChan := make(chan string)
 		stderrChan := make(chan string)
-		
+
 		// Start goroutines to read from pipes
 		go func() {
 			defer close(stdoutChan)
@@ -211,7 +211,7 @@ func (e *Executor) StreamCommandExecution(ctx context.Context, action models.Cmd
 				stdoutChan <- scanner.Text() + "\n"
 			}
 		}()
-		
+
 		go func() {
 			defer close(stderrChan)
 			scanner := bufio.NewScanner(stderr)
@@ -219,7 +219,7 @@ func (e *Executor) StreamCommandExecution(ctx context.Context, action models.Cmd
 				stderrChan <- scanner.Text() + "\n"
 			}
 		}()
-		
+
 		// Multiplex stdout and stderr
 		for {
 			select {
@@ -236,7 +236,7 @@ func (e *Executor) StreamCommandExecution(ctx context.Context, action models.Cmd
 					outputChan <- line
 				}
 			}
-			
+
 			// Exit when both channels are closed
 			if stdoutChan == nil && stderrChan == nil {
 				break
