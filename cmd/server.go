@@ -1,6 +1,28 @@
 package cmd
 
 import (
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"github.com/denysvitali/openhands-runtime-go/pkg/config"
+	"net/http"
 	"context"
 	"fmt"
 	"os"
@@ -37,6 +59,7 @@ func init() {
 
 	// Server-specific flags
 	serverCmd.Flags().IntP("port", "p", 8000, "Port to listen on")
+serverCmd.Flags().String("host", "0.0.0.0", "Host to listen on")
 	serverCmd.Flags().String("working-dir", "", "Working directory for action execution")
 	serverCmd.Flags().StringSlice("plugins", []string{}, "Plugins to initialize")
 	serverCmd.Flags().String("username", "openhands", "User to run as")
@@ -63,6 +86,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting OpenHands Runtime Server")
 
 	// Load configuration
+
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Validate configuration
+	if cfg.Server.Port <= 0 || cfg.Server.Host == "" {
+		return fmt.Errorf("invalid server configuration: port must be > 0 and host must not be empty")
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
@@ -85,6 +119,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create and start server
+
+	// Set up CORS and iframe support
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("X-Frame-Options", "ALLOW-FROM http://*")
+	})
+
+	// Listen on all interfaces
+	cfg.Server.Host = "0.0.0.0"
 	srv, err := server.New(cfg, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
@@ -93,7 +138,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Start server in a goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Infof("Server starting on port %d", cfg.Server.Port)
+		logger.Infof("Server starting on %s:%d", cfg.Server.Host, cfg.Server.Port)
 		serverErrors <- srv.Start()
 	}()
 
@@ -119,6 +164,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		logger.Infof("Received signal %v, shutting down...", sig)
 
 		// Graceful shutdown with timeout
+	logger.Info("Shutting down server...")
 		// The server.Shutdown() method now also handles executor.Close()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
