@@ -624,6 +624,8 @@ func (s *Server) handleUpdateMCPServer(c *gin.Context) {
 
 // handleSSE handles Server-Sent Events for streaming communication
 func (s *Server) handleSSE(c *gin.Context) {
+	// Authentication is handled by middleware
+	
 	// Set headers for SSE
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -735,12 +737,18 @@ func authMiddleware(expectedAPIKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip authentication for certain endpoints
 		path := c.Request.URL.Path
-		if path == "/alive" || path == "/server_info" || path == "/sse" || path == "/execute_action_stream" {
+		if path == "/alive" || path == "/server_info" {
 			c.Next()
 			return
 		}
 
 		apiKey := c.GetHeader("X-Session-API-Key")
+		
+		// For SSE endpoints, also check query parameters as fallback
+		if apiKey == "" && path == "/sse" {
+			apiKey = c.Query("api_key")
+		}
+		
 		if apiKey != expectedAPIKey {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid API Key"})
 			c.Abort()
