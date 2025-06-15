@@ -171,6 +171,18 @@ func (e *Executor) DownloadFile(ctx context.Context, path string) ([]byte, error
 
 	resolvedPath := e.resolvePath(path)
 
+	fileInfo, err := os.Stat(resolvedPath)
+	if err != nil {
+		span.RecordError(err)
+		return nil, err
+	}
+
+	if fileInfo.Size() > e.config.Server.MaxFileSize {
+		err := fmt.Errorf("file size (%d bytes) exceeds maximum allowed size (%d bytes)", fileInfo.Size(), e.config.Server.MaxFileSize)
+		span.RecordError(err)
+		return nil, err
+	}
+
 	content, err := os.ReadFile(resolvedPath)
 	if err != nil {
 		span.RecordError(err)
