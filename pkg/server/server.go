@@ -418,23 +418,54 @@ func (s *Server) handleExecuteActionStream(c *gin.Context) {
 		"command": command,
 		"timestamp": time.Now().Unix(),
 	})
-	c.Writer.Flush()
-
-	// Stream output lines
-	for line := range outputChan {
-		c.SSEvent("output", gin.H{
-			"data": line,
-			"timestamp": time.Now().Unix(),
-		})
-		c.Writer.Flush()
+	if flusher, ok := c.Writer.(http.Flusher); ok {
+		flusher.Flush()
 	}
 
-	// Send completion message
-	c.SSEvent("complete", gin.H{
-		"command": command,
-		"timestamp": time.Now().Unix(),
-	})
-	c.Writer.Flush()
+	// Stream output lines with client disconnect detection
+	clientGone := c.Request.Context().Done()
+	streamLoop:
+	for {
+		select {
+		case <-clientGone:
+			s.logger.Info("Client disconnected during streaming execution")
+			return
+		case line, ok := <-outputChan:
+			if !ok {
+				// Channel closed, command completed
+				break streamLoop
+			}
+			// Check again if client disconnected before writing
+			select {
+			case <-clientGone:
+				s.logger.Info("Client disconnected while sending output")
+				return
+			default:
+				c.SSEvent("output", gin.H{
+					"data": line,
+					"timestamp": time.Now().Unix(),
+				})
+				if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
+		}
+	}
+
+	// Send completion message if client still connected
+	select {
+	case <-clientGone:
+		s.logger.Info("Client disconnected before completion message")
+		return
+	default:
+		c.SSEvent("complete", gin.H{
+			"command": command,
+			"timestamp": time.Now().Unix(),
+		})
+		if flusher, ok := c.Writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
 
 	s.logger.Infof("Completed streaming execution for command: %s", command)
 }
@@ -661,11 +692,20 @@ func (s *Server) handleSSE(c *gin.Context) {
 			s.logger.Info("SSE client disconnected")
 			return
 		case <-ticker.C:
-			// Send heartbeat
-			c.SSEvent("heartbeat", gin.H{
-				"timestamp": time.Now().Unix(),
-			})
-			c.Writer.Flush()
+			// Send heartbeat - check if client is still connected
+			select {
+			case <-clientGone:
+				s.logger.Info("SSE client disconnected during heartbeat")
+				return
+			default:
+				// Client still connected, send heartbeat
+				c.SSEvent("heartbeat", gin.H{
+					"timestamp": time.Now().Unix(),
+				})
+				if flusher, ok := c.Writer.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
 		}
 	}
 }
