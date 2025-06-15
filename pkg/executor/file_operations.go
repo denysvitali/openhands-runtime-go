@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
 
