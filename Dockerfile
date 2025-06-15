@@ -53,7 +53,9 @@ RUN apk --no-cache add \
     vim \
     nano \
     kubectl \
-    helm
+    helm \
+    nodejs \
+    npm
 
 # Install Bazel (not available as Alpine package)
 RUN BAZEL_VERSION=$(wget -qO- https://api.github.com/repos/bazelbuild/bazel/releases/latest | grep '"tag_name"' | cut -d'"' -f4) && \
@@ -75,8 +77,8 @@ ENV PATH="/home/openhands/go/bin:${PATH}"
 
 RUN addgroup -g 1001 -S openhands && \
     adduser -u 1001 -S openhands -G openhands && \
-    mkdir -p /app /openhands/code /home/openhands/go/bin && \
-    chown -R openhands:openhands /app /openhands/code /home/openhands
+    mkdir -p /app /openhands/code /home/openhands/go/bin /nix && \
+    chown -R openhands:openhands /app /openhands/code /home/openhands /nix
 
 WORKDIR /openhands/code
 
@@ -85,7 +87,12 @@ COPY --from=builder /app/openhands-runtime-go /app/
 # Set up Go workspace for the openhands user
 USER openhands
 RUN go env -w GOPATH=/home/openhands/go && \
-    go env -w GOBIN=/home/openhands/go/bin
+    go env -w GOBIN=/home/openhands/go/bin && \
+    # Initialize Nix channels
+    nix-channel --add https://nixos.org/channels/nixpkgs-unstable && \
+    nix-channel --update && \
+    # Warm up Nix by installing a small package
+    nix-env -iA nixpkgs.hello
 
 EXPOSE 8000
 
