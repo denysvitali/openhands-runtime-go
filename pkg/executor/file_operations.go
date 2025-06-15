@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"strconv"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -191,8 +192,27 @@ func (e *Executor) executeFileRead(ctx context.Context, action models.FileReadAc
 		}
 	}
 
-	e.logger.Debugf("Successfully read file: %s (%d bytes)", path, len(contentStr))
-	return models.NewFileReadObservation(contentStr, action.Path), nil
+	// Truncate content if it exceeds the maximum allowed length
+	maxFileReadCharsStr := os.Getenv("MAX_FILE_READ_CHARS")
+	maxFileReadChars, errConv := strconv.Atoi(maxFileReadCharsStr)
+	if errConv != nil || maxFileReadChars <= 0 {
+		maxFileReadChars = 5000 // Default value
+	}
+
+	truncated := false
+	if len(contentStr) > maxFileReadChars {
+		contentStr = contentStr[:maxFileReadChars]
+		truncated = true
+		e.logger.Infof("File content truncated to %d characters for path: %s", maxFileReadChars, path)
+	}
+
+	finalContent := contentStr
+	if truncated {
+		finalContent += "\n... (file truncated)"
+	}
+
+	e.logger.Debugf("Successfully read file: %s (%d bytes, truncated: %v)", path, len(finalContent), truncated)
+	return models.NewFileReadObservation(finalContent, action.Path), nil
 }
 
 // executeFileWrite writes to a file
