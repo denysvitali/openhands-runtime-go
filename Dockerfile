@@ -87,12 +87,7 @@ COPY --from=builder /app/openhands-runtime-go /app/
 # Set up Go workspace for the openhands user
 USER openhands
 RUN go env -w GOPATH=/home/openhands/go && \
-    go env -w GOBIN=/home/openhands/go/bin && \
-    # Initialize Nix channels
-    nix-channel --add https://nixos.org/channels/nixpkgs-unstable && \
-    nix-channel --update && \
-    # Warm up Nix by installing a small package
-    nix-env -iA nixpkgs.hello
+    go env -w GOBIN=/home/openhands/go/bin
 
 EXPOSE 8000
 
