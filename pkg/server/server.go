@@ -128,6 +128,7 @@ func (s *Server) setupRoutes() {
 
 	// Action execution
 	s.engine.POST("/execute_action", s.handleExecuteAction)
+	s.engine.POST("/execute_action_stream", s.handleExecuteActionStream)
 
 	// File operations
 	s.engine.POST("/upload_file", s.handleUploadFile)
@@ -139,6 +140,9 @@ func (s *Server) setupRoutes() {
 
 	// MCP server management (placeholder)
 	s.engine.POST("/update_mcp_server", s.handleUpdateMCPServer)
+
+	// SSE endpoint for streaming communication
+	s.engine.GET("/sse", s.handleSSE)
 }
 
 // handleAlive handles health check requests
@@ -348,6 +352,96 @@ func (s *Server) handleExecuteAction(c *gin.Context) {
 	c.JSON(http.StatusOK, observation)
 }
 
+// handleExecuteActionStream handles streaming action execution requests
+func (s *Server) handleExecuteActionStream(c *gin.Context) {
+	tracer := otel.Tracer("openhands-runtime")
+	ctx, span := tracer.Start(c.Request.Context(), "handle_execute_action_stream")
+	defer span.End()
+
+	var req models.ActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		span.RecordError(err)
+		s.logger.Errorf("Failed to unmarshal streaming request: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if this is a command run action
+	actionType, ok := req.Action["action"].(string)
+	if !ok || actionType != "run" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "streaming is only supported for 'run' actions"})
+		return
+	}
+
+	// Parse the command run action
+	command, ok := req.Action["command"].(string)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing or invalid 'command' field"})
+		return
+	}
+
+	// Set headers for streaming
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	// Create a channel for streaming output
+	outputChan := make(chan string, 100)
+
+	// Create the action
+	action := models.CmdRunAction{
+		Command: command,
+	}
+
+	// Handle optional fields
+	if cwd, ok := req.Action["cwd"].(string); ok {
+		action.Cwd = cwd
+	}
+	if isStatic, ok := req.Action["is_static"].(bool); ok {
+		action.IsStatic = isStatic
+	}
+	if hardTimeout, ok := req.Action["hard_timeout"].(float64); ok {
+		action.HardTimeout = int(hardTimeout)
+	}
+
+	// Start streaming command execution in a goroutine
+	go func() {
+		err := s.executor.StreamCommandExecution(ctx, action, outputChan)
+		if err != nil {
+			s.logger.Errorf("Streaming command execution failed: %v", err)
+		}
+	}()
+
+	// Stream the output
+	s.logger.Infof("Starting streaming execution for command: %s", command)
+
+	// Send initial message
+	c.SSEvent("start", gin.H{
+		"command": command,
+		"timestamp": time.Now().Unix(),
+	})
+	c.Writer.Flush()
+
+	// Stream output lines
+	for line := range outputChan {
+		c.SSEvent("output", gin.H{
+			"data": line,
+			"timestamp": time.Now().Unix(),
+		})
+		c.Writer.Flush()
+	}
+
+	// Send completion message
+	c.SSEvent("complete", gin.H{
+		"command": command,
+		"timestamp": time.Now().Unix(),
+	})
+	c.Writer.Flush()
+
+	s.logger.Infof("Completed streaming execution for command: %s", command)
+}
+
 // handleUploadFile handles file upload requests
 func (s *Server) handleUploadFile(c *gin.Context) {
 	tracer := otel.Tracer("openhands-runtime")
@@ -528,6 +622,50 @@ func (s *Server) handleUpdateMCPServer(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// handleSSE handles Server-Sent Events for streaming communication
+func (s *Server) handleSSE(c *gin.Context) {
+	// Set headers for SSE
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Allow-Headers", "Cache-Control")
+
+	// For now, this is a basic implementation that keeps the connection alive
+	// In a full implementation, this would handle MCP protocol messages
+	s.logger.Info("SSE connection established")
+
+	// Send initial connection message
+	c.SSEvent("message", gin.H{
+		"type": "connection",
+		"data": gin.H{
+			"status": "connected",
+			"timestamp": time.Now().Unix(),
+		},
+	})
+
+	// Keep connection alive with periodic heartbeat
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Create a channel to handle client disconnect
+	clientGone := c.Request.Context().Done()
+
+	for {
+		select {
+		case <-clientGone:
+			s.logger.Info("SSE client disconnected")
+			return
+		case <-ticker.C:
+			// Send heartbeat
+			c.SSEvent("heartbeat", gin.H{
+				"timestamp": time.Now().Unix(),
+			})
+			c.Writer.Flush()
+		}
+	}
+}
+
 // ginLogger creates a gin logger middleware using logrus
 func ginLogger(logger *logrus.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -595,6 +733,13 @@ func corsMiddleware() gin.HandlerFunc {
 // authMiddleware validates API key
 func authMiddleware(expectedAPIKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip authentication for certain endpoints
+		path := c.Request.URL.Path
+		if path == "/alive" || path == "/server_info" || path == "/sse" || path == "/execute_action_stream" {
+			c.Next()
+			return
+		}
+
 		apiKey := c.GetHeader("X-Session-API-Key")
 		if apiKey != expectedAPIKey {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid API Key"})

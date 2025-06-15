@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -122,4 +123,134 @@ func (e *Executor) executeCmdRun(ctx context.Context, action models.CmdRunAction
 	}
 
 	return models.NewCmdOutputObservation(output, exitCode, commandID, action.Command), nil
+}
+
+// StreamCommandExecution executes a command and streams output in real-time
+func (e *Executor) StreamCommandExecution(ctx context.Context, action models.CmdRunAction, outputChan chan<- string) error {
+	_, span := e.tracer.Start(ctx, "stream_cmd_run")
+	defer span.End()
+
+	// Set span attributes for tracing
+	span.SetAttributes(
+		attribute.String("command", action.Command),
+		attribute.Bool("is_static", action.IsStatic),
+	)
+
+	// Log the command execution
+	e.logger.Infof("Streaming command execution: %s", action.Command)
+
+	// Security check for command injection
+	if err := e.sanitizeCommand(action.Command); err != nil {
+		e.logger.Warnf("Potentially dangerous command blocked: %s", action.Command)
+		outputChan <- fmt.Sprintf("Command blocked for security reasons: %v\n", err)
+		close(outputChan)
+		return err
+	}
+
+	// Set working directory if specified
+	cwd := e.workingDir
+	if action.Cwd != "" {
+		// Make sure the path is resolved if it's relative
+		if !filepath.IsAbs(action.Cwd) {
+			cwd = filepath.Join(e.workingDir, action.Cwd)
+		} else {
+			cwd = action.Cwd
+		}
+	}
+
+	// Create a new context with timeout if hardTimeout is specified
+	execCtx := ctx
+	var cancel context.CancelFunc
+	if action.HardTimeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, time.Duration(action.HardTimeout)*time.Second)
+		defer cancel()
+	}
+
+	// Prepare command options
+	cmd := exec.CommandContext(execCtx, "bash", "-c", action.Command)
+	cmd.Dir = cwd
+
+	// Set up environment variables
+	cmd.Env = []string{
+		fmt.Sprintf("PATH=%s", os.Getenv("PATH")),
+		fmt.Sprintf("HOME=%s", os.Getenv("HOME")),
+	}
+
+	// Create pipes for stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		close(outputChan)
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		close(outputChan)
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		close(outputChan)
+		return fmt.Errorf("failed to start command: %w", err)
+	}
+
+	// Stream output from both stdout and stderr
+	go func() {
+		defer close(outputChan)
+		
+		// Create channels for stdout and stderr
+		stdoutChan := make(chan string)
+		stderrChan := make(chan string)
+		
+		// Start goroutines to read from pipes
+		go func() {
+			defer close(stdoutChan)
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				stdoutChan <- scanner.Text() + "\n"
+			}
+		}()
+		
+		go func() {
+			defer close(stderrChan)
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				stderrChan <- scanner.Text() + "\n"
+			}
+		}()
+		
+		// Multiplex stdout and stderr
+		for {
+			select {
+			case line, ok := <-stdoutChan:
+				if !ok {
+					stdoutChan = nil
+				} else {
+					outputChan <- line
+				}
+			case line, ok := <-stderrChan:
+				if !ok {
+					stderrChan = nil
+				} else {
+					outputChan <- line
+				}
+			}
+			
+			// Exit when both channels are closed
+			if stdoutChan == nil && stderrChan == nil {
+				break
+			}
+		}
+	}()
+
+	// Wait for command to complete
+	err = cmd.Wait()
+	if err != nil {
+		if execCtx.Err() == context.DeadlineExceeded {
+			e.logger.Warnf("Streaming command timed out: %s", action.Command)
+		}
+	}
+
+	return err
 }
