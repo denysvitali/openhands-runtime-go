@@ -377,7 +377,7 @@ func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEd
 		}
 
 		// Generate diff for new file
-		diff := e.generateDiff("", action.Content, action.Path)
+        
 
 		return models.NewFileEditObservation(
 			fmt.Sprintf("The file %s has been edited.", action.Path),
@@ -451,7 +451,7 @@ func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEd
 	}
 
 	// Generate diff
-	diff := e.generateDiff(originalContent, newContent, action.Path)
+	
 
 	e.logger.Infof("Successfully edited file: %s", action.Path)
 
@@ -507,7 +507,7 @@ func (e *Executor) executeInsert(ctx context.Context, path string, insertLine in
 	}
 
 	// Generate diff
-	diff := e.generateDiff(originalContent, newContent, path)
+	
 
 	e.logger.Infof("Successfully inserted text at line %d in %s", insertLine, path)
 
