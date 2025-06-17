@@ -380,7 +380,7 @@ func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEd
 		diff := e.generateDiff("", action.Content, action.Path)
 
 		return models.NewFileEditObservation(
-			fmt.Sprintf("The file %s has been edited.", action.Path),
+			diff,
 			action.Path,
 			"",             // old_content
 			action.Content, // new_content
@@ -512,7 +512,7 @@ func (e *Executor) executeInsert(ctx context.Context, path string, insertLine in
 	e.logger.Infof("Successfully inserted text at line %d in %s", insertLine, path)
 
 	return models.NewFileEditObservation(
-		fmt.Sprintf("The file %s has been edited.", path),
+		diff,
 		path,
 		originalContent,
 		newContent,
@@ -555,10 +555,13 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 		return models.NewErrorObservation(fmt.Sprintf("Failed to write changes to %s: %v", path, err), "FileEditError"), nil
 	}
 
+	// Generate diff
+	diff := e.generateDiff(oldContent, newContent, path)
+
 	e.logger.Infof("Successfully replaced string in %s", path)
 
 	return models.NewFileEditObservation(
-		fmt.Sprintf("The file %s has been edited.", path),
+		diff,
 		path,
 		oldContent,
 		newContent,
