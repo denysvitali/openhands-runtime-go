@@ -301,7 +301,7 @@ func (e *Executor) executeFileCreate(ctx context.Context, path, content string) 
 	}
 
 	// Use FileWriteObservation for new file creation to avoid the assertion error
-	return models.NewFileWriteObservation(fmt.Sprintf("File created successfully at: %s", path), path), nil
+	return models.NewFileWriteObservation(fmt.Sprintf("The file %s has been edited.", path), path), nil
 }
 
 // executeFileEdit performs file edits using different approaches based on the action command
@@ -333,8 +333,8 @@ func (e *Executor) executeFileEdit(ctx context.Context, action models.FileEditAc
 		// Create a new file with the provided content
 		return e.executeFileCreate(ctx, action.Path, action.FileText)
 	case "str_replace":
-		if action.OldStr == "" || action.NewStr == "" {
-			return models.NewErrorObservation("String replace requires non-empty old_str and new_str", "FileEditError"), nil
+		if action.OldStr == "" {
+			return models.NewErrorObservation("String replace requires non-empty old_str", "FileEditError"), nil
 		}
 		e.logger.Infof("Replacing string in %s", action.Path)
 		return e.executeStringReplace(ctx, path, action.OldStr, action.NewStr)
@@ -380,7 +380,7 @@ func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEd
 		diff := e.generateDiff("", action.Content, action.Path)
 
 		return models.NewFileEditObservation(
-			diff,
+			fmt.Sprintf("The file %s has been edited.", action.Path),
 			action.Path,
 			"",             // old_content
 			action.Content, // new_content
@@ -512,7 +512,7 @@ func (e *Executor) executeInsert(ctx context.Context, path string, insertLine in
 	e.logger.Infof("Successfully inserted text at line %d in %s", insertLine, path)
 
 	return models.NewFileEditObservation(
-		diff, // Use the diff instead of a static message
+		fmt.Sprintf("The file %s has been edited.", path),
 		path,
 		originalContent,
 		newContent,
@@ -555,10 +555,15 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 		return models.NewErrorObservation(fmt.Sprintf("Failed to write changes to %s: %v", path, err), "FileEditError"), nil
 	}
 
-	editMsg := fmt.Sprintf("Successfully replaced '%s' with '%s' in %s", oldStr, newStr, path)
-	e.logger.Infof(editMsg)
+	e.logger.Infof("Successfully replaced string in %s", path)
 
-	return models.NewFileEditObservation(editMsg, path, oldContent, newContent, "str_replace"), nil
+	return models.NewFileEditObservation(
+		fmt.Sprintf("The file %s has been edited.", path),
+		path,
+		oldContent,
+		newContent,
+		"str_replace",
+	), nil
 }
 
 // generateDiff creates a simple diff representation between old and new content
