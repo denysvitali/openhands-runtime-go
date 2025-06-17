@@ -451,7 +451,7 @@ func (e *Executor) executeLLMBasedEdit(ctx context.Context, action models.FileEd
 	}
 
 	// Generate diff
-	
+	diff := e.generateDiff(originalContent, newContent, action.Path)
 
 	e.logger.Infof("Successfully edited file: %s", action.Path)
 
@@ -554,6 +554,9 @@ func (e *Executor) executeStringReplace(ctx context.Context, path, oldStr, newSt
 		span.RecordError(err)
 		return models.NewErrorObservation(fmt.Sprintf("Failed to write changes to %s: %v", path, err), "FileEditError"), nil
 	}
+
+	// Generate diff
+	diff := e.generateDiff(oldContent, newContent, path)
 
 	e.logger.Infof("Successfully replaced string in %s", path)
 
