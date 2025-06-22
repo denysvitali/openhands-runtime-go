@@ -1,0 +1,49 @@
+
+
+# Project Roadmap: openhands-runtime-go Alignment
+
+## Goal:
+Align `openhands-runtime-go` with `All-Hands-AI/OpenHands` in terms of core functionality and API, focusing on performance, while addressing missing features like advanced editor support and persistent bash sessions/tmux.
+
+## Phases:
+
+### Phase 1: Deep Dive and API Definition (Current)
+*   **Objective:** Understand existing implementations and define the target API.
+*   **Tasks:**
+    *   [x] Initial exploration of `openhands-runtime-go` project structure.
+    *   [x] Initial exploration of `All-Hands-AI/OpenHands` `README.md` for high-level understanding.
+    *   [x] Detailed analysis of `openhands-runtime-go`'s `pkg/executor` to understand current command execution.
+    *   [x] Investigate `All-Hands-AI/OpenHands`'s sandbox implementation (e.g., how it manages containers, persistent sessions, and communication). This will likely involve looking at their codebase.
+    *   [ ] Define the API contract that `openhands-runtime-go` must adhere to, based on `All-Hands-AI/OpenHands`'s behavior, specifically for command execution and interactive sessions.
+    *   [ ] Identify specific functionalities within `All-Hands-AI/OpenHands` that need to be replicated or adapted in `openhands-runtime-go`.
+
+### Phase 2: Core Functionality Alignment (Persistent Sessions & Process Management)
+*   **Objective:** Implement persistent bash sessions (via tmux) and manage processes directly within the Go runtime's container to match `All-Hands-AI/OpenHands`.
+*   **Tasks:**
+    *   [ ] **Persistent Bash Session (Tmux):**
+        *   Ensure `tmux` is installed and a session is started within the Go runtime's container.
+        *   Implement a mechanism to send commands to the `tmux` pane (e.g., by directly executing `tmux send-keys` commands from the Go application).
+        *   Implement a mechanism to capture and stream output from the `tmux` pane (e.g., by directly executing `tmux capture-pane` or by attaching to the `tmux` session's output).
+        *   Implement the custom `PS1` parsing logic (similar to `bash.py`) to extract command output, exit codes, and current working directory.
+        *   Handle interactive input (e.g., `C-c`, `C-d`) by sending appropriate `tmux` control sequences.
+    *   [ ] **Process Management:** The Go runtime will be responsible for starting and managing other long-running processes within its own container, such as the OpenVSCode Server.
+
+### Phase 3: Performance Optimization & Environment Parity
+*   **Objective:** Optimize for performance and ensure the Go runtime's environment closely matches the necessary components of the reference OpenHands runtime.
+*   **Tasks:**
+    *   [ ] **Environment Parity:** Ensure the Go runtime's environment closely mirrors the essential dependencies and configurations (Python, Poetry, Micromamba, Playwright, etc.) defined in OpenHands' `Dockerfile.j2`, excluding VSCode and browser-related components. This might involve creating a custom Dockerfile for the Go runtime.
+    *   [ ] Conduct performance benchmarks against `All-Hands-AI/OpenHands` to identify bottlenecks in `openhands-runtime-go`.
+    *   [ ] Optimize critical paths for performance, focusing on command execution and process management.
+
+### Phase 4: Testing and Validation
+*   **Objective:** Ensure functional and API parity, and performance targets are met.
+*   **Tasks:**
+    *   [ ] Develop comprehensive integration tests to verify API compatibility and functional equivalence with `All-Hands-AI/OpenHands`.
+    *   [ ] Develop performance tests to validate optimizations.
+    *   [ ] Address any discrepancies found during testing.
+
+## Commit Strategy:
+*   Commit often with clear, concise messages.
+*   Each commit should represent a logical, atomic change.
+*   Push changes frequently to a new branch.
+
