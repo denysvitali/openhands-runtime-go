@@ -28,13 +28,12 @@ Align `openhands-runtime-go` with `All-Hands-AI/OpenHands` in terms of core func
         *   Handle interactive input (e.g., `C-c`, `C-d`) by sending appropriate `tmux` control sequences.
     *   [ ] **Process Management:** The Go runtime will be responsible for starting and managing other long-running processes within its own container, such as the OpenVSCode Server.
 
-### Phase 3: Advanced Features & Performance Optimization
-*   **Objective:** Add advanced features (VSCode integration) and optimize for performance.
+### Phase 3: Performance Optimization & Environment Parity
+*   **Objective:** Optimize for performance and ensure the Go runtime's environment closely matches the necessary components of the reference OpenHands runtime.
 *   **Tasks:**
-    *   [ ] **VSCode Integration:** Expose the OpenVSCode Server running inside the sandbox container by mapping its port to the host.
-    *   [ ] **Environment Parity:** Ensure the Go runtime's sandbox environment closely mirrors the dependencies and configurations (Python, Poetry, Micromamba, Playwright, etc.) defined in OpenHands' `Dockerfile.j2`. This might involve creating a custom Dockerfile for the Go runtime if the OpenHands one is too tightly coupled to Python.
+    *   [ ] **Environment Parity:** Ensure the Go runtime's environment closely mirrors the essential dependencies and configurations (Python, Poetry, Micromamba, Playwright, etc.) defined in OpenHands' `Dockerfile.j2`, excluding VSCode and browser-related components. This might involve creating a custom Dockerfile for the Go runtime.
     *   [ ] Conduct performance benchmarks against `All-Hands-AI/OpenHands` to identify bottlenecks in `openhands-runtime-go`.
-    *   [ ] Optimize critical paths for performance, focusing on command execution, container startup, and file operations.
+    *   [ ] Optimize critical paths for performance, focusing on command execution and process management.
 
 ### Phase 4: Testing and Validation
 *   **Objective:** Ensure functional and API parity, and performance targets are met.
