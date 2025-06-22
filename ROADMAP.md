@@ -17,20 +17,16 @@ Align `openhands-runtime-go` with `All-Hands-AI/OpenHands` in terms of core func
     *   [ ] Define the API contract that `openhands-runtime-go` must adhere to, based on `All-Hands-AI/OpenHands`'s behavior, specifically for command execution and interactive sessions.
     *   [ ] Identify specific functionalities within `All-Hands-AI/OpenHands` that need to be replicated or adapted in `openhands-runtime-go`.
 
-### Phase 2: Core Functionality Alignment (Persistent Sessions & Sandboxing)
-*   **Objective:** Implement persistent bash sessions (via tmux) and robust container management to match `All-Hands-AI/OpenHands`.
+### Phase 2: Core Functionality Alignment (Persistent Sessions & Process Management)
+*   **Objective:** Implement persistent bash sessions (via tmux) and manage processes directly within the Go runtime's container to match `All-Hands-AI/OpenHands`.
 *   **Tasks:**
-    *   [ ] **Container Orchestration:** Implement Docker client integration in `pkg/executor` to:
-        *   Pull/build the OpenHands runtime image (or a compatible one).
-        *   Create and start sandbox containers with appropriate volume mounts (for working directory) and port mappings (for VSCode).
-        *   Manage container lifecycle (stop, remove).
     *   [ ] **Persistent Bash Session (Tmux):**
-        *   Within the sandbox container, ensure `tmux` is installed and a session is started.
-        *   Implement a mechanism to send commands to the `tmux` pane (e.g., using `docker exec` to run `tmux send-keys`).
-        *   Implement a mechanism to capture and stream output from the `tmux` pane (e.g., using `docker exec` to run `tmux capture-pane` or by attaching to the `tmux` session's output).
+        *   Ensure `tmux` is installed and a session is started within the Go runtime's container.
+        *   Implement a mechanism to send commands to the `tmux` pane (e.g., by directly executing `tmux send-keys` commands from the Go application).
+        *   Implement a mechanism to capture and stream output from the `tmux` pane (e.g., by directly executing `tmux capture-pane` or by attaching to the `tmux` session's output).
         *   Implement the custom `PS1` parsing logic (similar to `bash.py`) to extract command output, exit codes, and current working directory.
         *   Handle interactive input (e.g., `C-c`, `C-d`) by sending appropriate `tmux` control sequences.
-    *   [ ] **File System Synchronization:** Ensure the host's working directory is correctly mounted into the sandbox container and accessible by the `tmux` session.
+    *   [ ] **Process Management:** The Go runtime will be responsible for starting and managing other long-running processes within its own container, such as the OpenVSCode Server.
 
 ### Phase 3: Advanced Features & Performance Optimization
 *   **Objective:** Add advanced features (VSCode integration) and optimize for performance.

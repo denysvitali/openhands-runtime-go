@@ -28,7 +28,7 @@ OpenHands agents are designed to "modify code, run commands, browse the web, cal
 
 ## Comparison Summary:
 
-The `openhands-runtime-go` project appears to be a reimplementation of the core runtime functionality of `All-Hands-AI/OpenHands`. The key difference identified so far is the lack of advanced editor support and persistent bash/tmux sessions in the Go version. The Go project's `executor` package will be critical to compare against how OpenHands handles command execution and sandboxing. The Go project will need to replicate the sandbox orchestration capabilities of the reference OpenHands project.
+The `openhands-runtime-go` project is intended to *be* the runtime itself, running within a Docker container, similar to how the Python-based OpenHands runtime operates. The key difference identified so far is the lack of advanced editor support and persistent bash/tmux sessions *within this runtime container* in the Go version. The Go project's `executor` package will be critical to compare against how OpenHands handles command execution and sandboxing *within the same container*. The Go project will need to manage processes (like tmux and openvscode-server) directly within its own container, rather than orchestrating separate sandbox containers.
 
 ## Next Steps:
 1.  Deep dive into the `executor/` package in `openhands-runtime-go` to understand its current capabilities.
